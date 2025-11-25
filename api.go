@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -22,9 +23,12 @@ type StartTaskResponse struct {
 
 // handleStartTask handles requests to start a task
 func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config) {
+	log.Printf("[API] Start task request from %s", r.RemoteAddr)
+	
 	// Authenticate request
 	_, err := validateJWT(r, config.Auth.Secret)
 	if err != nil {
+		log.Printf("[API] Authentication failed: %v", err)
 		http.Error(w, fmt.Sprintf("Unauthorized: %v", err), http.StatusUnauthorized)
 		return
 	}
@@ -48,9 +52,12 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	// Start the task
 	taskID, err := taskManager.StartTask(req.TaskName)
 	if err != nil {
+		log.Printf("[API] Failed to start task '%s': %v", req.TaskName, err)
 		http.Error(w, fmt.Sprintf("Failed to start task: %v", err), http.StatusInternalServerError)
 		return
 	}
+	
+	log.Printf("[API] Task created: task_id=%s, task_name=%s", taskID, req.TaskName)
 
 	// Generate JWT token for viewer access
 	viewerToken, err := generateViewerToken(taskID, config.Auth.Secret, 24*time.Hour)

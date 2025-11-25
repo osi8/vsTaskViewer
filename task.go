@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,13 +63,15 @@ func (tm *TaskManager) StartTask(taskName string) (string, error) {
 	stderrPath := filepath.Join(outputDir, "stderr")
 
 	// Create wrapper script that redirects output to files
-	// Use unbuffered output to ensure immediate writes
+	// Write PID to file and use unbuffered output to ensure immediate writes
+	pidPath := filepath.Join(outputDir, "pid")
 	wrapperScript := fmt.Sprintf(`#!/bin/bash
 set -e
+echo $$ > %s
 cd /tmp/%s
 exec > %s 2> %s
 %s
-`, taskID, stdoutPath, stderrPath, taskConfig.Command)
+`, pidPath, taskID, stdoutPath, stderrPath, taskConfig.Command)
 
 	scriptPath := filepath.Join(outputDir, "run.sh")
 	if err := os.WriteFile(scriptPath, []byte(wrapperScript), 0755); err != nil {
@@ -80,8 +83,11 @@ exec > %s 2> %s
 	cmd := exec.Command("sh", "-c", atCmd)
 	
 	if err := cmd.Run(); err != nil {
+		log.Printf("[TASK] Failed to schedule task with at: %v", err)
 		return "", fmt.Errorf("failed to schedule task with at: %w", err)
 	}
+	
+	log.Printf("[TASK] Task scheduled: task_id=%s, task_name=%s, script=%s", taskID, taskName, scriptPath)
 
 	// Register running task
 	tm.mu.Lock()

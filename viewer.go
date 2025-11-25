@@ -2,14 +2,18 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 )
 
 // handleViewer serves the HTML viewer page
 func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
+	log.Printf("[VIEWER] Viewer accessed from %s", r.RemoteAddr)
+	
 	// Authenticate request
 	claims, err := validateJWT(r, config.Auth.Secret)
 	if err != nil {
+		log.Printf("[VIEWER] Authentication failed: %v", err)
 		http.Error(w, fmt.Sprintf("Unauthorized: %v", err), http.StatusUnauthorized)
 		return
 	}
@@ -20,9 +24,12 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
 	}
 
 	if taskID == "" {
+		log.Printf("[VIEWER] Missing task_id")
 		http.Error(w, "task_id is required", http.StatusBadRequest)
 		return
 	}
+	
+	log.Printf("[VIEWER] Serving viewer for task_id=%s", taskID)
 
 	// Get token from query
 	token := r.URL.Query().Get("token")
@@ -125,6 +132,10 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
         .stderr {
             color: #f48771;
         }
+        .system {
+            color: #4ec9b0;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -142,6 +153,11 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
             <div class="output-label">STDERR</div>
             <div id="stderr" class="output stderr"></div>
         </div>
+        
+        <div class="output-container">
+            <div class="output-label">SYSTEM</div>
+            <div id="system" class="output system"></div>
+        </div>
     </div>
 
     <script>
@@ -149,6 +165,7 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
         const wsUrl = '%s';
         const stdoutEl = document.getElementById('stdout');
         const stderrEl = document.getElementById('stderr');
+        const systemEl = document.getElementById('system');
         const statusEl = document.getElementById('status');
 
         let ws = null;
@@ -174,6 +191,13 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
                         } else if (data.type === 'stderr') {
                             stderrEl.textContent += data.data;
                             stderrEl.scrollTop = stderrEl.scrollHeight;
+                        } else if (data.type === 'system') {
+                            let msg = data.message;
+                            if (data.pid) {
+                                msg += ' (PID: ' + data.pid + ')';
+                            }
+                            systemEl.textContent += msg + '\\n';
+                            systemEl.scrollTop = systemEl.scrollHeight;
                         }
                     } catch (e) {
                         console.error('Failed to parse message:', e);
