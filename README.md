@@ -29,11 +29,26 @@ GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o vsTaskViewer
 
 ### Konfiguration
 
-Kopieren Sie die Beispiel-Konfiguration nach `/etc/vsTaskViewer.toml`:
+Die Konfigurationsdatei wird in folgender Reihenfolge gesucht:
+
+1. Pfad angegeben mit `-c` Flag
+2. `vsTaskViewer.toml` im gleichen Verzeichnis wie die Binary
+3. `/etc/vsTaskViewer/vsTaskViewer.toml`
+
+Das Templates-Verzeichnis (HTML-Dateien) wird in folgender Reihenfolge gesucht:
+
+1. Pfad angegeben mit `-t` Flag
+2. `html/` im gleichen Verzeichnis wie die Binary
+3. `/etc/vsTaskViewer/html/`
+
+**Beispiel-Installation:**
 
 ```bash
-sudo cp example-config.toml /etc/vsTaskViewer.toml
-sudo nano /etc/vsTaskViewer.toml
+# Systemweite Installation
+sudo mkdir -p /etc/vsTaskViewer/html
+sudo cp example-config.toml /etc/vsTaskViewer/vsTaskViewer.toml
+sudo cp -r html/* /etc/vsTaskViewer/html/
+sudo nano /etc/vsTaskViewer/vsTaskViewer.toml
 ```
 
 **Wichtig**: Ändern Sie das `auth.secret` in der Konfiguration!
@@ -89,10 +104,23 @@ Alle HTML-Dateien enthalten inline CSS und JavaScript.
 ./vsTaskViewer
 ```
 
-Oder mit angegebenem Port:
+**Verfügbare Optionen:**
 
 ```bash
-./vsTaskViewer -port 8080
+# Hilfe anzeigen
+./vsTaskViewer -h
+
+# Mit spezifischer Config-Datei
+./vsTaskViewer -c /path/to/config.toml
+
+# Mit spezifischem Templates-Verzeichnis
+./vsTaskViewer -t /path/to/html
+
+# Mit spezifischem Port
+./vsTaskViewer -p 9090
+
+# Kombiniert
+./vsTaskViewer -c /path/to/config.toml -t /path/to/html -p 9090
 ```
 
 ### Task starten
