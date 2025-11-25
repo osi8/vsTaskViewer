@@ -201,7 +201,7 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 		// File doesn't exist yet, send waiting message
 		msg := WebSocketMessage{
 			Type: outputType,
-			Data: fmt.Sprintf("Waiting for output file...\n"),
+			Data: fmt.Sprintf("Waiting for output file..."),
 		}
 		if data, err := json.Marshal(msg); err == nil {
 			safeConn.WriteMessage(websocket.TextMessage, data)
