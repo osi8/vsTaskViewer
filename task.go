@@ -21,10 +21,13 @@ type TaskManager struct {
 
 // RunningTask represents a currently running task
 type RunningTask struct {
-	ID        string
-	TaskName  string
-	StartTime time.Time
-	OutputDir string
+	ID              string
+	TaskName        string
+	StartTime       time.Time
+	OutputDir       string
+	MaxExecutionTime time.Duration // Maximum execution time (0 = no limit)
+	Terminated      bool          // Whether SIGTERM has been sent
+	Killed          bool          // Whether SIGKILL has been sent
 }
 
 // NewTaskManager creates a new task manager
@@ -101,13 +104,22 @@ exit $EXIT_CODE
 	
 	log.Printf("[TASK] Task scheduled: task_id=%s, task_name=%s, script=%s", taskID, taskName, scriptPath)
 
+	// Calculate max execution time
+	var maxExecTime time.Duration
+	if taskConfig.MaxExecutionTime > 0 {
+		maxExecTime = time.Duration(taskConfig.MaxExecutionTime) * time.Second
+	}
+
 	// Register running task
 	tm.mu.Lock()
 	tm.runningTasks[taskID] = &RunningTask{
-		ID:        taskID,
-		TaskName:  taskName,
-		StartTime: time.Now(),
-		OutputDir: outputDir,
+		ID:               taskID,
+		TaskName:         taskName,
+		StartTime:        time.Now(),
+		OutputDir:        outputDir,
+		MaxExecutionTime: maxExecTime,
+		Terminated:       false,
+		Killed:           false,
 	}
 	tm.mu.Unlock()
 

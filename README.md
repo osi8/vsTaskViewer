@@ -8,6 +8,9 @@ vsTaskViewer ist eine Go-Anwendung, die vordefinierte Tasks über den Linux `at`
 - **Web-Interface**: Minimalistisches HTML-Interface zur Live-Anzeige der Task-Ausgabe
 - **WebSocket-Support**: Live-Streaming von stdout und stderr über WebSocket
 - **JWT-Authentifizierung**: Alle Requests müssen mit einem gültigen JWT-Token authentifiziert werden
+- **Max Execution Time**: Automatische Beendigung von Tasks nach konfigurierbarer Zeit (SIGTERM → SIGKILL)
+- **Rate Limiting**: Schutz vor Brute-Force und DoS-Angriffen
+- **Optional TLS/HTTPS**: Unterstützung für verschlüsselte Verbindungen
 - **Single Binary**: Erstellt ein einzelnes Linux amd64 Binary
 
 ## Installation
@@ -61,6 +64,9 @@ secret = "your-secret-key"
 name = "task-name"
 description = "Task description"
 command = "command to execute"
+# Maximum execution time in seconds (0 = no limit)
+# If exceeded, SIGTERM is sent, then SIGKILL after 30 seconds
+max_execution_time = 300
 ```
 
 ### HTML-Verzeichnis

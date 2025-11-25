@@ -127,9 +127,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 		log.Printf("[WEBSOCKET] Sent initial message (no PID yet) for task_id=%s", taskID)
 	}
 
-	// Start monitoring process completion
+	// Start monitoring process completion and timeout
 	ctx := r.Context()
-	go monitorProcess(ctx, safeConn, taskManager, taskID, pidPath, exitCodePath, task.OutputDir)
+	go monitorProcess(ctx, safeConn, taskManager, taskID, pidPath, exitCodePath, task.OutputDir, task.MaxExecutionTime)
 
 	// Start tailing stdout and stderr
 	go tailFile(ctx, safeConn, stdoutPath, "stdout", taskID)
@@ -197,7 +197,7 @@ func isProcessRunning(pid int) bool {
 }
 
 // monitorProcess monitors the process and handles cleanup when it finishes
-func monitorProcess(ctx context.Context, safeConn *safeConn, taskManager *TaskManager, taskID, pidPath, exitCodePath, outputDir string) {
+func monitorProcess(ctx context.Context, safeConn *safeConn, taskManager *TaskManager, taskID, pidPath, exitCodePath, outputDir string, maxExecutionTime time.Duration) {
 	// Wait for PID file to be created
 	var pid int
 	for i := 0; i < 60; i++ {
@@ -220,14 +220,30 @@ func monitorProcess(ctx context.Context, safeConn *safeConn, taskManager *TaskMa
 
 	log.Printf("[MONITOR] Monitoring process PID=%d for task_id=%s", pid, taskID)
 
+	// Start timeout monitor if max execution time is set
+	var timeoutTimer *time.Timer
+	var timeoutChan <-chan time.Time
+	if maxExecutionTime > 0 {
+		timeoutTimer = time.NewTimer(maxExecutionTime)
+		timeoutChan = timeoutTimer.C
+		log.Printf("[MONITOR] Max execution time set to %v for task_id=%s", maxExecutionTime, taskID)
+	}
+
 	// Poll to check if process is still running
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+	if timeoutTimer != nil {
+		defer timeoutTimer.Stop()
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-timeoutChan:
+			// Max execution time exceeded
+			handleTimeout(safeConn, taskManager, taskID, pid)
+			timeoutChan = nil // Disable timeout channel after handling
 		case <-ticker.C:
 			if !isProcessRunning(pid) {
 				// Process has ended, read exit code
