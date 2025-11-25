@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -57,7 +58,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	claims, err := validateJWT(r, config.Auth.Secret)
 	if err != nil {
 		log.Printf("[WEBSOCKET] Authentication failed: %v", err)
-		http.Error(w, fmt.Sprintf("Unauthorized: %v", err), http.StatusUnauthorized)
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, "Unauthorized: %v", err)
 		return
 	}
 
@@ -68,7 +70,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 
 	if taskID == "" {
 		log.Printf("[WEBSOCKET] Missing task_id")
-		http.Error(w, "task_id is required", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "task_id is required")
 		return
 	}
 
@@ -76,7 +79,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	task, err := taskManager.GetTask(taskID)
 	if err != nil {
 		log.Printf("[WEBSOCKET] Task not found: task_id=%s, error=%v", taskID, err)
-		http.Error(w, fmt.Sprintf("Task not found: %v", err), http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "Task not found: %v", err)
 		return
 	}
 
@@ -98,6 +102,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	stdoutPath := filepath.Join(task.OutputDir, "stdout")
 	stderrPath := filepath.Join(task.OutputDir, "stderr")
 	pidPath := filepath.Join(task.OutputDir, "pid")
+	exitCodePath := filepath.Join(task.OutputDir, "exitcode")
 
 	// Try to read PID and send initial message
 	pid := readPID(pidPath)
@@ -109,8 +114,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 		log.Printf("[WEBSOCKET] Sent initial message (no PID yet) for task_id=%s", taskID)
 	}
 
-	// Start tailing stdout and stderr
+	// Start monitoring process completion
 	ctx := r.Context()
+	go monitorProcess(ctx, safeConn, taskManager, taskID, pidPath, exitCodePath, task.OutputDir)
+
+	// Start tailing stdout and stderr
 	go tailFile(ctx, safeConn, stdoutPath, "stdout", taskID)
 	go tailFile(ctx, safeConn, stderrPath, "stderr", taskID)
 
@@ -162,6 +170,100 @@ func readPID(pidPath string) int {
 		return 0
 	}
 	return pid
+}
+
+// isProcessRunning checks if a process with the given PID is still running
+func isProcessRunning(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// Signal 0 doesn't actually send a signal, just checks if process exists
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
+}
+
+// monitorProcess monitors the process and handles cleanup when it finishes
+func monitorProcess(ctx context.Context, safeConn *safeConn, taskManager *TaskManager, taskID, pidPath, exitCodePath, outputDir string) {
+	// Wait for PID file to be created
+	var pid int
+	for i := 0; i < 60; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		pid = readPID(pidPath)
+		if pid > 0 {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if pid == 0 {
+		log.Printf("[MONITOR] PID not found for task_id=%s", taskID)
+		return
+	}
+
+	log.Printf("[MONITOR] Monitoring process PID=%d for task_id=%s", pid, taskID)
+
+	// Poll to check if process is still running
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !isProcessRunning(pid) {
+				// Process has ended, read exit code
+				exitCode := readExitCode(exitCodePath)
+				
+				// Send completion message
+				msg := fmt.Sprintf("Process ended with exit code: %d", exitCode)
+				sendSystemMessage(safeConn, "completed", msg, pid)
+				log.Printf("[MONITOR] Process ended: task_id=%s, pid=%d, exit_code=%d", taskID, pid, exitCode)
+
+				// Wait a bit for final output to be written and message to be sent
+				time.Sleep(2 * time.Second)
+
+				// Remove task from manager
+				taskManager.mu.Lock()
+				delete(taskManager.runningTasks, taskID)
+				taskManager.mu.Unlock()
+
+				// Close WebSocket connection (client should have closed it already, but close it here too)
+				safeConn.mu.Lock()
+				safeConn.conn.Close()
+				safeConn.mu.Unlock()
+
+				// Cleanup: remove task directory (after connection is closed)
+				time.Sleep(1 * time.Second)
+				if err := os.RemoveAll(outputDir); err != nil {
+					log.Printf("[MONITOR] Failed to cleanup directory %s: %v", outputDir, err)
+				} else {
+					log.Printf("[MONITOR] Cleaned up directory: %s", outputDir)
+				}
+
+				return
+			}
+		}
+	}
+}
+
+// readExitCode reads the exit code from the exitcode file
+func readExitCode(exitCodePath string) int {
+	data, err := os.ReadFile(exitCodePath)
+	if err != nil {
+		return -1 // Unknown exit code
+	}
+	exitCodeStr := strings.TrimSpace(string(data))
+	exitCode, err := strconv.Atoi(exitCodeStr)
+	if err != nil {
+		return -1
+	}
+	return exitCode
 }
 
 // sendSystemMessage sends a system message over WebSocket
@@ -217,10 +319,7 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 	}
 	defer file.Close()
 
-	log.Printf("[TAIL] Reading existing content from: %s", filePath)
-	
 	// Read existing content first
-	lineCount := 0
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		select {
@@ -228,19 +327,16 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 			return
 		default:
 		}
-		lineCount++
 		msg := WebSocketMessage{
 			Type: outputType,
 			Data: scanner.Text() + "\n",
 		}
 		if data, err := json.Marshal(msg); err == nil {
 			if err := safeConn.WriteMessage(websocket.TextMessage, data); err != nil {
-				log.Printf("[TAIL] Error sending message: %v", err)
 				return
 			}
 		}
 	}
-	log.Printf("[TAIL] Sent %d existing lines from: %s", lineCount, filePath)
 
 	// Get current position
 	lastPos, err := file.Seek(0, io.SeekEnd)
@@ -284,7 +380,6 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 				file.Seek(lastPos, io.SeekStart)
 
 				// Read new lines
-				newLineCount := 0
 				scanner := bufio.NewScanner(file)
 				for scanner.Scan() {
 					select {
@@ -293,21 +388,16 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 						return
 					default:
 					}
-					newLineCount++
 					msg := WebSocketMessage{
 						Type: outputType,
 						Data: scanner.Text() + "\n",
 					}
 					if data, err := json.Marshal(msg); err == nil {
 						if err := safeConn.WriteMessage(websocket.TextMessage, data); err != nil {
-							log.Printf("[TAIL] Error sending new line: %v", err)
 							file.Close()
 							return
 						}
 					}
-				}
-				if newLineCount > 0 {
-					log.Printf("[TAIL] Sent %d new lines from: %s", newLineCount, filePath)
 				}
 
 				// Update last position

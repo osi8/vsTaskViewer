@@ -14,9 +14,9 @@ import (
 
 // TaskManager manages task execution
 type TaskManager struct {
-	config     *Config
+	config       *Config
 	runningTasks map[string]*RunningTask
-	mu         sync.RWMutex
+	mu           sync.RWMutex
 }
 
 // RunningTask represents a currently running task
@@ -63,15 +63,19 @@ func (tm *TaskManager) StartTask(taskName string) (string, error) {
 	stderrPath := filepath.Join(outputDir, "stderr")
 
 	// Create wrapper script that redirects output to files
-	// Write PID to file and use unbuffered output to ensure immediate writes
+	// Write PID to file, capture exit code, and use unbuffered output
 	pidPath := filepath.Join(outputDir, "pid")
+	exitCodePath := filepath.Join(outputDir, "exitcode")
 	wrapperScript := fmt.Sprintf(`#!/bin/bash
-set -e
+set +e
 echo $$ > %s
 cd /tmp/%s
 exec > %s 2> %s
 %s
-`, pidPath, taskID, stdoutPath, stderrPath, taskConfig.Command)
+EXIT_CODE=$?
+echo $EXIT_CODE > %s
+exit $EXIT_CODE
+`, pidPath, taskID, stdoutPath, stderrPath, taskConfig.Command, exitCodePath)
 
 	scriptPath := filepath.Join(outputDir, "run.sh")
 	if err := os.WriteFile(scriptPath, []byte(wrapperScript), 0755); err != nil {

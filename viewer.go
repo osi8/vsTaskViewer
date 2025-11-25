@@ -14,7 +14,8 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
 	claims, err := validateJWT(r, config.Auth.Secret)
 	if err != nil {
 		log.Printf("[VIEWER] Authentication failed: %v", err)
-		http.Error(w, fmt.Sprintf("Unauthorized: %v", err), http.StatusUnauthorized)
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, "Unauthorized: %v", err)
 		return
 	}
 
@@ -25,7 +26,8 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	if taskID == "" {
 		log.Printf("[VIEWER] Missing task_id")
-		http.Error(w, "task_id is required", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "task_id is required")
 		return
 	}
 	
@@ -34,7 +36,8 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Get token from query
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		http.Error(w, "token is required", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "token is required")
 		return
 	}
 
@@ -170,6 +173,7 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
 
         let ws = null;
         let reconnectAttempts = 0;
+        let processCompleted = false;
         const maxReconnectAttempts = 5;
 
         function connect() {
@@ -198,6 +202,19 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
                             }
                             systemEl.textContent += msg + '\\n';
                             systemEl.scrollTop = systemEl.scrollHeight;
+                            
+                            // Check if process completed
+                            if (data.message && data.message.includes('Process ended')) {
+                                processCompleted = true;
+                                statusEl.textContent = 'Process Completed';
+                                statusEl.className = 'status disconnected';
+                                // Close WebSocket proactively
+                                setTimeout(function() {
+                                    if (ws && ws.readyState === WebSocket.OPEN) {
+                                        ws.close();
+                                    }
+                                }, 1000);
+                            }
                         }
                     } catch (e) {
                         console.error('Failed to parse message:', e);
@@ -211,13 +228,14 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
                 };
 
                 ws.onclose = function() {
-                    statusEl.textContent = 'Disconnected';
+                    statusEl.textContent = processCompleted ? 'Process Completed' : 'Disconnected';
                     statusEl.className = 'status disconnected';
                     
-                    if (reconnectAttempts < maxReconnectAttempts) {
+                    // Only try to reconnect if process hasn't completed
+                    if (!processCompleted && reconnectAttempts < maxReconnectAttempts) {
                         reconnectAttempts++;
                         setTimeout(connect, 2000 * reconnectAttempts);
-                    } else {
+                    } else if (!processCompleted) {
                         statusEl.textContent = 'Disconnected - Max reconnect attempts reached';
                     }
                 };

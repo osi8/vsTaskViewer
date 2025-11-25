@@ -29,7 +29,9 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	_, err := validateJWT(r, config.Auth.Secret)
 	if err != nil {
 		log.Printf("[API] Authentication failed: %v", err)
-		http.Error(w, fmt.Sprintf("Unauthorized: %v", err), http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Unauthorized: %v", err)})
 		return
 	}
 
