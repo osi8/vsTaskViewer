@@ -41,8 +41,10 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	}
 
 	var req StartTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+	// Use limited reader to prevent memory exhaustion
+	if err := decodeJSONRequest(r.Body, &req, maxJSONSize); err != nil {
+		log.Printf("[API] Failed to decode request: %v", err)
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return
 	}
 

@@ -44,6 +44,15 @@ Die Konfigurationsdatei `/etc/vsTaskViewer.toml` hat folgende Struktur:
 port = 8080
 # Pfad zum HTML-Verzeichnis (muss existieren)
 html_dir = "./html"
+# Rate Limiting: Requests pro Minute pro IP (0 = deaktiviert)
+rate_limit_rpm = 60
+# Maximale Request-Größe in Bytes (0 = Standard 10MB)
+max_request_size = 10485760
+# TLS-Konfiguration (optional, leer lassen um HTTPS zu deaktivieren)
+# tls_key_file = "/etc/ssl/private/key.pem"
+# tls_cert_file = "/etc/ssl/certs/fullchain.pem"
+# Erlaubte Origins für WebSocket (leer = alle erlauben)
+# allowed_origins = ["http://localhost:8080"]
 
 [auth]
 secret = "your-secret-key"

@@ -36,33 +36,50 @@ func main() {
 	// Initialize task manager
 	taskManager := NewTaskManager(config)
 
-	// Setup HTTP server
+	// Create WebSocket upgrader with CORS settings
+	upgrader := createUpgrader(config.Server.AllowedOrigins)
+
+	// Initialize rate limiter
+	rateLimiter := NewRateLimiter(config.Server.RateLimitRPM)
+
+	// Setup HTTP server with request size limits
+	maxRequestSize := config.Server.MaxRequestSize
+	if maxRequestSize == 0 {
+		maxRequestSize = 10 * 1024 * 1024 // Default 10MB
+	}
+
 	mux := http.NewServeMux()
 
-	// API endpoint to start tasks
-	mux.HandleFunc("/api/start", func(w http.ResponseWriter, r *http.Request) {
+	// API endpoint to start tasks (with rate limiting)
+	mux.HandleFunc("/api/start", RateLimitMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		// Enforce request size limit
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
 		handleStartTask(w, r, taskManager, config)
-	})
+	}, rateLimiter))
 
-	// Viewer endpoint
-	mux.HandleFunc("/viewer", func(w http.ResponseWriter, r *http.Request) {
+	// Viewer endpoint (with rate limiting)
+	mux.HandleFunc("/viewer", RateLimitMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleViewer(w, r, taskManager, config)
-	})
+	}, rateLimiter))
 
-	// WebSocket endpoint
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWebSocket(w, r, taskManager, config)
-	})
+	// WebSocket endpoint (with rate limiting)
+	mux.HandleFunc("/ws", RateLimitMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleWebSocket(w, r, taskManager, config, upgrader)
+	}, rateLimiter))
 
-	// Health check endpoint
+	// Health check endpoint (no rate limiting)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", *port),
-		Handler: mux,
+		Addr:         fmt.Sprintf(":%d", *port),
+		Handler:      mux,
+		MaxHeaderBytes: 1 << 20, // 1MB max header size
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	// Graceful shutdown
@@ -80,9 +97,26 @@ func main() {
 		}
 	}()
 
-	log.Printf("Starting server on port %d", *port)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server failed: %v", err)
+	// Start server with or without TLS
+	if config.Server.TLSKeyFile != "" && config.Server.TLSCertFile != "" {
+		// Validate TLS files exist
+		if _, err := os.Stat(config.Server.TLSKeyFile); os.IsNotExist(err) {
+			log.Fatalf("TLS key file not found: %s", config.Server.TLSKeyFile)
+		}
+		if _, err := os.Stat(config.Server.TLSCertFile); os.IsNotExist(err) {
+			log.Fatalf("TLS certificate file not found: %s", config.Server.TLSCertFile)
+		}
+		log.Printf("Starting HTTPS server on port %d", *port)
+		log.Printf("TLS key: %s", config.Server.TLSKeyFile)
+		log.Printf("TLS cert: %s", config.Server.TLSCertFile)
+		if err := server.ListenAndServeTLS(config.Server.TLSCertFile, config.Server.TLSKeyFile); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	} else {
+		log.Printf("Starting HTTP server on port %d", *port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
 	}
 }
 

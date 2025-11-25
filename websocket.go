@@ -19,10 +19,23 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in this implementation
-	},
+// createUpgrader creates a WebSocket upgrader with origin checking
+func createUpgrader(allowedOrigins []string) websocket.Upgrader {
+	return websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			// If no origins specified, allow all (for internal networks)
+			if len(allowedOrigins) == 0 {
+				return true
+			}
+			origin := r.Header.Get("Origin")
+			for _, allowed := range allowedOrigins {
+				if origin == allowed {
+					return true
+				}
+			}
+			return false
+		},
+	}
 }
 
 // WebSocketMessage represents a message sent over WebSocket
@@ -51,7 +64,7 @@ func (sc *safeConn) WriteMessage(messageType int, data []byte) error {
 }
 
 // handleWebSocket handles WebSocket connections for live task output
-func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config) {
+func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config, upgrader websocket.Upgrader) {
 	log.Printf("[WEBSOCKET] Connection attempt from %s", r.RemoteAddr)
 	
 	// Authenticate request

@@ -2,7 +2,7 @@
 
 build:
 	@echo "Building vsTaskViewer..."
-	@GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o vsTaskViewer main.go config.go auth.go task.go api.go viewer.go websocket.go
+	@GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o vsTaskViewer main.go config.go auth.go task.go api.go viewer.go websocket.go html.go security.go errors.go ratelimit.go
 	@echo "Build complete: vsTaskViewer"
 
 clean:

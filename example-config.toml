@@ -5,6 +5,15 @@
 port = 8080
 # Path to HTML directory containing error pages and viewer.html
 html_dir = "./html"
+# Allowed origins for WebSocket connections (empty = allow all, for internal networks)
+# allowed_origins = ["http://localhost:8080", "https://example.com"]
+# Rate limiting: requests per minute per IP (0 = disabled)
+rate_limit_rpm = 60
+# Max request body size in bytes (0 = default 10MB)
+max_request_size = 10485760
+# TLS configuration (optional, leave empty to disable HTTPS)
+# tls_key_file = "/etc/ssl/private/key.pem"
+# tls_cert_file = "/etc/ssl/certs/fullchain.pem"
 
 [auth]
 # Secret key for JWT token signing (use a strong random string in production)

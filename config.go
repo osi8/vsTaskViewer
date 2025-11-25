@@ -9,8 +9,13 @@ type Config struct {
 
 // ServerConfig contains server settings
 type ServerConfig struct {
-	Port    int    `toml:"port"`
-	HTMLDir string `toml:"html_dir"`
+	Port            int      `toml:"port"`
+	HTMLDir         string   `toml:"html_dir"`
+	AllowedOrigins  []string `toml:"allowed_origins"` // For WebSocket CORS
+	RateLimitRPM    int      `toml:"rate_limit_rpm"`  // Requests per minute per IP (0 = disabled)
+	MaxRequestSize  int64    `toml:"max_request_size"` // Max request body size in bytes (0 = default 10MB)
+	TLSKeyFile      string   `toml:"tls_key_file"`     // Path to TLS private key file
+	TLSCertFile     string   `toml:"tls_cert_file"`    // Path to TLS certificate file (fullchain)
 }
 
 // AuthConfig contains authentication settings

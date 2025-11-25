@@ -37,6 +37,11 @@ func NewTaskManager(config *Config) *TaskManager {
 
 // StartTask starts a predefined task using the `at` command
 func (tm *TaskManager) StartTask(taskName string) (string, error) {
+	// Validate task name
+	if err := validateTaskName(taskName); err != nil {
+		return "", fmt.Errorf("invalid task name: %w", err)
+	}
+
 	// Find task in config
 	var taskConfig *TaskConfig
 	for i := range tm.config.Tasks {
@@ -53,9 +58,9 @@ func (tm *TaskManager) StartTask(taskName string) (string, error) {
 	// Generate unique task ID
 	taskID := uuid.New().String()
 
-	// Create output directory
+	// Create output directory with restrictive permissions (0700)
 	outputDir := filepath.Join("/tmp", taskID)
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if err := os.MkdirAll(outputDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -64,21 +69,24 @@ func (tm *TaskManager) StartTask(taskName string) (string, error) {
 
 	// Create wrapper script that redirects output to files
 	// Write PID to file, capture exit code, and use unbuffered output
+	// Escape command to prevent injection even if config is compromised
 	pidPath := filepath.Join(outputDir, "pid")
 	exitCodePath := filepath.Join(outputDir, "exitcode")
+	escapedCommand := escapeBashCommand(taskConfig.Command)
 	wrapperScript := fmt.Sprintf(`#!/bin/bash
 set +e
 echo $$ > %s
 cd /tmp/%s
 exec > %s 2> %s
-%s
+bash -c %s
 EXIT_CODE=$?
 echo $EXIT_CODE > %s
 exit $EXIT_CODE
-`, pidPath, taskID, stdoutPath, stderrPath, taskConfig.Command, exitCodePath)
+`, pidPath, taskID, stdoutPath, stderrPath, escapedCommand, exitCodePath)
 
 	scriptPath := filepath.Join(outputDir, "run.sh")
-	if err := os.WriteFile(scriptPath, []byte(wrapperScript), 0755); err != nil {
+	// Use 0700 permissions (owner only) instead of 0755
+	if err := os.WriteFile(scriptPath, []byte(wrapperScript), 0700); err != nil {
 		return "", fmt.Errorf("failed to create wrapper script: %w", err)
 	}
 
@@ -108,6 +116,11 @@ exit $EXIT_CODE
 
 // GetTask returns information about a running task
 func (tm *TaskManager) GetTask(taskID string) (*RunningTask, error) {
+	// Validate task ID format (must be UUID)
+	if !validateTaskID(taskID) {
+		return nil, fmt.Errorf("invalid task ID format")
+	}
+
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
