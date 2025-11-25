@@ -107,7 +107,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	// Try to read PID and send initial message
 	pid := readPID(pidPath)
 	if pid > 0 {
-		sendSystemMessage(safeConn, "connected", fmt.Sprintf("WebSocket connected. Process PID: %d", pid), pid)
+		sendSystemMessage(safeConn, "connected", fmt.Sprintf("WebSocket connected. Process started"), pid)
 		log.Printf("[WEBSOCKET] Sent initial message with PID=%d for task_id=%s", pid, taskID)
 	} else {
 		sendSystemMessage(safeConn, "connected", "WebSocket connected. Waiting for process to start...", 0)
