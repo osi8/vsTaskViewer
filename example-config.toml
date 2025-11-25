@@ -1,0 +1,26 @@
+# vsTaskViewer Configuration Example
+# Copy this file to /etc/vsTaskViewer.toml
+
+[server]
+port = 8080
+
+[auth]
+# Secret key for JWT token signing (use a strong random string in production)
+secret = "your-secret-key-change-this-in-production"
+
+# Define tasks that can be executed
+[[tasks]]
+name = "example-task"
+description = "Example task that runs a simple command"
+command = "echo 'Hello from task' && sleep 5 && echo 'Task completed'"z
+
+[[tasks]]
+name = "long-running-task"
+description = "A longer running task example"
+command = "for i in {1..10}; do echo \"Iteration $i\"; sleep 2; done"
+
+[[tasks]]
+name = "error-task"
+description = "Task that generates some error output"
+command = "echo 'This is stdout' && echo 'This is stderr' >&2 && exit 0"
+
