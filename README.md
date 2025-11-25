@@ -42,6 +42,8 @@ Die Konfigurationsdatei `/etc/vsTaskViewer.toml` hat folgende Struktur:
 ```toml
 [server]
 port = 8080
+# Pfad zum HTML-Verzeichnis (muss existieren)
+html_dir = "./html"
 
 [auth]
 secret = "your-secret-key"
@@ -51,6 +53,18 @@ name = "task-name"
 description = "Task description"
 command = "command to execute"
 ```
+
+### HTML-Verzeichnis
+
+Das `html_dir` Verzeichnis muss folgende Dateien enthalten:
+- `viewer.html` - Haupt-Viewer-Seite (mit Template-Platzhaltern `{{.TaskID}}` und `{{.WebSocketURL}}`)
+- `400.html` - Bad Request Fehlerseite
+- `401.html` - Unauthorized Fehlerseite
+- `404.html` - Not Found Fehlerseite
+- `405.html` - Method Not Allowed Fehlerseite
+- `500.html` - Internal Server Error Fehlerseite
+
+Alle HTML-Dateien enthalten inline CSS und JavaScript.
 
 ## Verwendung
 

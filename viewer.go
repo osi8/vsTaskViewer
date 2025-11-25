@@ -4,18 +4,18 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 )
 
 // handleViewer serves the HTML viewer page
-func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
+func handleViewer(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config) {
 	log.Printf("[VIEWER] Viewer accessed from %s", r.RemoteAddr)
 	
 	// Authenticate request
 	claims, err := validateJWT(r, config.Auth.Secret)
 	if err != nil {
 		log.Printf("[VIEWER] Authentication failed: %v", err)
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "Unauthorized: %v", err)
+		serveErrorHTML(w, http.StatusUnauthorized, config.Server.HTMLDir)
 		return
 	}
 
@@ -26,8 +26,15 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	if taskID == "" {
 		log.Printf("[VIEWER] Missing task_id")
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "task_id is required")
+		serveErrorHTML(w, http.StatusBadRequest, config.Server.HTMLDir)
+		return
+	}
+
+	// Check if task exists BEFORE rendering viewer
+	_, err = taskManager.GetTask(taskID)
+	if err != nil {
+		log.Printf("[VIEWER] Task not found: task_id=%s, error=%v", taskID, err)
+		serveErrorHTML(w, http.StatusNotFound, config.Server.HTMLDir)
 		return
 	}
 	
@@ -36,8 +43,7 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Get token from query
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "token is required")
+		serveErrorHTML(w, http.StatusBadRequest, config.Server.HTMLDir)
 		return
 	}
 
@@ -48,208 +54,18 @@ func handleViewer(w http.ResponseWriter, r *http.Request, config *Config) {
 	}
 	wsURL := fmt.Sprintf("%s://%s/ws?task_id=%s&token=%s", scheme, r.Host, taskID, token)
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Task Viewer - %s</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            background: #1e1e1e;
-            color: #d4d4d4;
-            padding: 20px;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        h1 {
-            color: #4ec9b0;
-            margin-bottom: 10px;
-        }
-        .info {
-            color: #858585;
-            margin-bottom: 20px;
-            font-size: 14px;
-        }
-        .status {
-            padding: 10px;
-            margin-bottom: 20px;
-            border-radius: 4px;
-            background: #252526;
-            border-left: 3px solid #007acc;
-        }
-        .status.connected {
-            border-left-color: #4ec9b0;
-        }
-        .status.disconnected {
-            border-left-color: #f48771;
-        }
-        .output-container {
-            background: #252526;
-            border-radius: 4px;
-            padding: 15px;
-            margin-bottom: 10px;
-        }
-        .output-label {
-            color: #858585;
-            font-size: 12px;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-        }
-        .output {
-            background: #1e1e1e;
-            border: 1px solid #3e3e42;
-            border-radius: 4px;
-            padding: 15px;
-            font-size: 13px;
-            line-height: 1.6;
-            max-height: 400px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-        .output::-webkit-scrollbar {
-            width: 10px;
-        }
-        .output::-webkit-scrollbar-track {
-            background: #1e1e1e;
-        }
-        .output::-webkit-scrollbar-thumb {
-            background: #424242;
-            border-radius: 5px;
-        }
-        .output::-webkit-scrollbar-thumb:hover {
-            background: #4e4e4e;
-        }
-        .stdout {
-            color: #d4d4d4;
-        }
-        .stderr {
-            color: #f48771;
-        }
-        .system {
-            color: #4ec9b0;
-            font-style: italic;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Task Viewer</h1>
-        <div class="info">Task ID: %s</div>
-        <div id="status" class="status disconnected">Disconnected</div>
-        
-        <div class="output-container">
-            <div class="output-label">STDOUT</div>
-            <div id="stdout" class="output stdout"></div>
-        </div>
-        
-        <div class="output-container">
-            <div class="output-label">STDERR</div>
-            <div id="stderr" class="output stderr"></div>
-        </div>
-        
-        <div class="output-container">
-            <div class="output-label">SYSTEM</div>
-            <div id="system" class="output system"></div>
-        </div>
-    </div>
+	// Load viewer HTML template
+	htmlTemplate, err := loadViewerHTML(config.Server.HTMLDir)
+	if err != nil {
+		log.Printf("[VIEWER] Failed to load viewer.html: %v", err)
+		serveErrorHTML(w, http.StatusInternalServerError, config.Server.HTMLDir)
+		return
+	}
 
-    <script>
-        const taskId = '%s';
-        const wsUrl = '%s';
-        const stdoutEl = document.getElementById('stdout');
-        const stderrEl = document.getElementById('stderr');
-        const systemEl = document.getElementById('system');
-        const statusEl = document.getElementById('status');
-
-        let ws = null;
-        let reconnectAttempts = 0;
-        let processCompleted = false;
-        const maxReconnectAttempts = 5;
-
-        function connect() {
-            try {
-                ws = new WebSocket(wsUrl);
-
-                ws.onopen = function() {
-                    statusEl.textContent = 'Connected';
-                    statusEl.className = 'status connected';
-                    reconnectAttempts = 0;
-                };
-
-                ws.onmessage = function(event) {
-                    try {
-                        const data = JSON.parse(event.data);
-                        if (data.type === 'stdout') {
-                            stdoutEl.textContent += data.data;
-                            stdoutEl.scrollTop = stdoutEl.scrollHeight;
-                        } else if (data.type === 'stderr') {
-                            stderrEl.textContent += data.data;
-                            stderrEl.scrollTop = stderrEl.scrollHeight;
-                        } else if (data.type === 'system') {
-                            let msg = data.message;
-                            if (data.pid) {
-                                msg += ' (PID: ' + data.pid + ')';
-                            }
-                            systemEl.textContent += msg + '\\n';
-                            systemEl.scrollTop = systemEl.scrollHeight;
-                            
-                            // Check if process completed
-                            if (data.message && data.message.includes('Process ended')) {
-                                processCompleted = true;
-                                statusEl.textContent = 'Process Completed';
-                                statusEl.className = 'status disconnected';
-                                // Close WebSocket proactively
-                                setTimeout(function() {
-                                    if (ws && ws.readyState === WebSocket.OPEN) {
-                                        ws.close();
-                                    }
-                                }, 1000);
-                            }
-                        }
-                    } catch (e) {
-                        console.error('Failed to parse message:', e);
-                    }
-                };
-
-                ws.onerror = function(error) {
-                    console.error('WebSocket error:', error);
-                    statusEl.textContent = 'Connection Error';
-                    statusEl.className = 'status disconnected';
-                };
-
-                ws.onclose = function() {
-                    statusEl.textContent = processCompleted ? 'Process Completed' : 'Disconnected';
-                    statusEl.className = 'status disconnected';
-                    
-                    // Only try to reconnect if process hasn't completed
-                    if (!processCompleted && reconnectAttempts < maxReconnectAttempts) {
-                        reconnectAttempts++;
-                        setTimeout(connect, 2000 * reconnectAttempts);
-                    } else if (!processCompleted) {
-                        statusEl.textContent = 'Disconnected - Max reconnect attempts reached';
-                    }
-                };
-            } catch (e) {
-                console.error('Failed to connect:', e);
-                statusEl.textContent = 'Connection Failed';
-                statusEl.className = 'status disconnected';
-            }
-        }
-
-        connect();
-    </script>
-</body>
-</html>`, taskID, taskID, taskID, wsURL)
+	// Replace template placeholders
+	html := htmlTemplate
+	html = strings.ReplaceAll(html, "{{.TaskID}}", taskID)
+	html = strings.ReplaceAll(html, "{{.WebSocketURL}}", wsURL)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))

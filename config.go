@@ -9,7 +9,8 @@ type Config struct {
 
 // ServerConfig contains server settings
 type ServerConfig struct {
-	Port int `toml:"port"`
+	Port    int    `toml:"port"`
+	HTMLDir string `toml:"html_dir"`
 }
 
 // AuthConfig contains authentication settings

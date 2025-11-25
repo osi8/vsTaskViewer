@@ -46,7 +46,7 @@ func main() {
 
 	// Viewer endpoint
 	mux.HandleFunc("/viewer", func(w http.ResponseWriter, r *http.Request) {
-		handleViewer(w, r, config)
+		handleViewer(w, r, taskManager, config)
 	})
 
 	// WebSocket endpoint
@@ -99,6 +99,16 @@ func loadConfig(path string) (*Config, error) {
 
 	if len(config.Tasks) == 0 {
 		return nil, fmt.Errorf("at least one task must be defined in config")
+	}
+
+	// Set default HTML directory if not specified
+	if config.Server.HTMLDir == "" {
+		config.Server.HTMLDir = "./html"
+	}
+
+	// Validate HTML directory exists
+	if _, err := os.Stat(config.Server.HTMLDir); os.IsNotExist(err) {
+		return nil, fmt.Errorf("HTML directory does not exist: %s", config.Server.HTMLDir)
 	}
 
 	return &config, nil

@@ -3,6 +3,8 @@
 
 [server]
 port = 8080
+# Path to HTML directory containing error pages and viewer.html
+html_dir = "./html"
 
 [auth]
 # Secret key for JWT token signing (use a strong random string in production)
@@ -12,7 +14,7 @@ secret = "your-secret-key-change-this-in-production"
 [[tasks]]
 name = "example-task"
 description = "Example task that runs a simple command"
-command = "echo 'Hello from task' && sleep 5 && echo 'Task completed'"z
+command = "echo 'Hello from task' && sleep 5 && echo 'Task completed'"
 
 [[tasks]]
 name = "long-running-task"
