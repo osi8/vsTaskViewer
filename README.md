@@ -50,6 +50,12 @@ Das Task-Ausgabe-Verzeichnis wird in folgender Reihenfolge gesucht:
 2. `task_dir` aus der Konfigurationsdatei
 3. `/var/vsTaskViewer` (Standard)
 
+Der Ausführungsbenutzer (exec user) wird in folgender Reihenfolge gesucht:
+
+1. Benutzer angegeben mit `-u` Flag
+2. `exec_user` aus der Konfigurationsdatei
+3. `www-data` (Standard, UID 33)
+
 **Beispiel-Installation:**
 
 ```bash
@@ -74,6 +80,9 @@ html_dir = "./html"
 # Pfad zum Task-Ausgabe-Verzeichnis (Standard: /var/vsTaskViewer)
 # Muss im Besitz des ausführenden Benutzers sein und Berechtigungen 700 haben
 # task_dir = "/var/vsTaskViewer"
+# Benutzer zum Ausführen (Standard: www-data)
+# Muss existieren und wird nach dem Laden der TLS-Dateien gesetzt
+# exec_user = "www-data"
 # Rate Limiting: Requests pro Minute pro IP (0 = deaktiviert)
 rate_limit_rpm = 60
 # Maximale Request-Größe in Bytes (0 = Standard 10MB)
@@ -150,11 +159,14 @@ Alle HTML-Dateien enthalten inline CSS und JavaScript.
 # Mit spezifischem Task-Ausgabe-Verzeichnis
 ./vsTaskViewer -d /var/vsTaskViewer
 
+# Mit spezifischem Ausführungsbenutzer
+./vsTaskViewer -u www-data
+
 # Mit spezifischem Port
 ./vsTaskViewer -p 9090
 
 # Kombiniert
-./vsTaskViewer -c /path/to/config.toml -t /path/to/html -d /var/vsTaskViewer -p 9090
+./vsTaskViewer -c /path/to/config.toml -t /path/to/html -d /var/vsTaskViewer -u www-data -p 9090
 ```
 
 ### Task starten
@@ -497,6 +509,24 @@ Bei fehlerhaften Parametern wird ein `400 Bad Request` mit einer beschreibenden 
 - **Rate Limiting**: Schutz vor Brute-Force und DoS-Angriffen
 - **Request Size Limits**: Schutz vor zu großen Requests (Standard: 10MB)
 - **Command Escaping**: Commands werden sicher escaped, um Injection zu verhindern
+- **Privilege Dropping**: Die Anwendung läuft standardmäßig als `www-data` (UID 33) nach dem Start
+- **TLS-Dateien**: TLS-Schlüssel und Zertifikate werden vor dem Dropping der Rechte geladen
+
+### Privilege Dropping und Startup-Reihenfolge
+
+Die Anwendung folgt einer spezifischen Startup-Reihenfolge für maximale Sicherheit:
+
+1. **Konfiguration laden**: Konfigurationsdatei wird geladen und Pfade werden aufgelöst
+2. **TLS-Dateien laden**: Wenn TLS konfiguriert ist, werden die Schlüssel- und Zertifikatsdateien **vor** dem Dropping der Rechte in den Speicher geladen (benötigt möglicherweise erhöhte Rechte)
+3. **Rechte reduzieren**: Die Anwendung wechselt zum konfigurierten Ausführungsbenutzer (`exec_user`, Standard: `www-data`)
+4. **Validierung**: Verzeichnisse werden als Ausführungsbenutzer validiert
+5. **Server starten**: HTTP/HTTPS-Server wird gestartet
+
+**Wichtig für Produktion:**
+
+- Starten Sie die Anwendung als `root`, wenn TLS verwendet wird und die TLS-Dateien erhöhte Rechte benötigen
+- Die Anwendung reduziert automatisch die Rechte nach dem Laden der TLS-Dateien
+- Wenn die Anwendung bereits als Zielbenutzer läuft (nicht root), wird kein Privilege Dropping durchgeführt
 
 **Wichtig für Produktion:**
 

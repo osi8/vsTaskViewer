@@ -8,6 +8,8 @@ html_dir = "./html"
 # Path to task output directory (default: /var/vsTaskViewer)
 # Must be owned by the process executor and have 700 permissions
 # task_dir = "/var/vsTaskViewer"
+# User to run as (default: www-data)
+# exec_user = "www-data"
 # Allowed origins for WebSocket connections (empty = allow all, for internal networks)
 # allowed_origins = ["http://localhost:8080", "https://example.com"]
 # Rate limiting: requests per minute per IP (0 = disabled)

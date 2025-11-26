@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -19,6 +21,7 @@ var (
 	configPathFlag   = flag.String("c", "", "Path to configuration file (optional)")
 	templatesPathFlag = flag.String("t", "", "Path to templates/HTML directory (optional)")
 	taskDirFlag      = flag.String("d", "", "Path to task output directory (optional)")
+	execUserFlag     = flag.String("u", "", "User to run as (optional)")
 	port             = flag.Int("p", 8080, "Port to listen on")
 	showHelp         = flag.Bool("h", false, "Show help message")
 )
@@ -47,6 +50,12 @@ Options:
                  2. task_dir from config file
                  3. /var/vsTaskViewer
 
+  -u string    User to run as (optional)
+               Search order:
+                 1. User specified with -u flag
+                 2. exec_user from config file
+                 3. www-data
+
   -p int       Port to listen on (default: 8080, can be overridden in config)
   -h           Show this help message
 
@@ -55,6 +64,7 @@ Examples:
   vsTaskViewer -c /path/to/config.toml
   vsTaskViewer -c /path/to/config.toml -t /path/to/html
   vsTaskViewer -c /path/to/config.toml -d /var/vsTaskViewer
+  vsTaskViewer -c /path/to/config.toml -u www-data
   vsTaskViewer -p 9090
 `
 
@@ -141,14 +151,53 @@ func main() {
 		log.Printf("Using task directory from config: %s", config.Server.TaskDir)
 	}
 
-	// Validate task directory (check/create, ownership, permissions)
-	if err := validateTaskDir(config.Server.TaskDir); err != nil {
-		log.Fatalf("Task directory validation failed: %v", err)
+	// Override exec user if -u flag is set, otherwise use search order
+	if *execUserFlag != "" {
+		config.Server.ExecUser = *execUserFlag
+		log.Printf("Using exec user from -u flag: %s", config.Server.ExecUser)
+	} else if config.Server.ExecUser == "" {
+		config.Server.ExecUser = findExecUser()
+		log.Printf("Using exec user: %s", config.Server.ExecUser)
+	} else {
+		log.Printf("Using exec user from config: %s", config.Server.ExecUser)
 	}
 
 	// Override port from config if specified
 	if config.Server.Port > 0 {
 		*port = config.Server.Port
+	}
+
+	// Load TLS files early (before dropping privileges, as they may require elevated rights)
+	var tlsKeyData, tlsCertData []byte
+	if config.Server.TLSKeyFile != "" && config.Server.TLSCertFile != "" {
+		// Validate TLS files exist
+		if _, err := os.Stat(config.Server.TLSKeyFile); os.IsNotExist(err) {
+			log.Fatalf("TLS key file not found: %s", config.Server.TLSKeyFile)
+		}
+		if _, err := os.Stat(config.Server.TLSCertFile); os.IsNotExist(err) {
+			log.Fatalf("TLS certificate file not found: %s", config.Server.TLSCertFile)
+		}
+		// Read TLS files into memory (before dropping privileges)
+		var err error
+		tlsKeyData, err = os.ReadFile(config.Server.TLSKeyFile)
+		if err != nil {
+			log.Fatalf("Failed to read TLS key file: %v", err)
+		}
+		tlsCertData, err = os.ReadFile(config.Server.TLSCertFile)
+		if err != nil {
+			log.Fatalf("Failed to read TLS certificate file: %v", err)
+		}
+		log.Printf("Loaded TLS files (key: %s, cert: %s)", config.Server.TLSKeyFile, config.Server.TLSCertFile)
+	}
+
+	// Drop privileges to exec user (after loading TLS files)
+	if err := dropPrivileges(config.Server.ExecUser); err != nil {
+		log.Fatalf("Failed to drop privileges: %v", err)
+	}
+
+	// Validate task directory (check/create, ownership, permissions) - now as exec user
+	if err := validateTaskDir(config.Server.TaskDir); err != nil {
+		log.Fatalf("Task directory validation failed: %v", err)
 	}
 
 	// Initialize task manager
@@ -216,18 +265,36 @@ func main() {
 	}()
 
 	// Start server with or without TLS
-	if config.Server.TLSKeyFile != "" && config.Server.TLSCertFile != "" {
-		// Validate TLS files exist
-		if _, err := os.Stat(config.Server.TLSKeyFile); os.IsNotExist(err) {
-			log.Fatalf("TLS key file not found: %s", config.Server.TLSKeyFile)
+	if len(tlsKeyData) > 0 && len(tlsCertData) > 0 {
+		// Write TLS data to temporary files (as exec user)
+		tmpKeyFile, err := os.CreateTemp("", "vsTaskViewer-key-*.pem")
+		if err != nil {
+			log.Fatalf("Failed to create temporary TLS key file: %v", err)
 		}
-		if _, err := os.Stat(config.Server.TLSCertFile); os.IsNotExist(err) {
-			log.Fatalf("TLS certificate file not found: %s", config.Server.TLSCertFile)
+		defer os.Remove(tmpKeyFile.Name())
+		if _, err := tmpKeyFile.Write(tlsKeyData); err != nil {
+			tmpKeyFile.Close()
+			log.Fatalf("Failed to write temporary TLS key file: %v", err)
 		}
+		tmpKeyFile.Close()
+		os.Chmod(tmpKeyFile.Name(), 0600)
+
+		tmpCertFile, err := os.CreateTemp("", "vsTaskViewer-cert-*.pem")
+		if err != nil {
+			log.Fatalf("Failed to create temporary TLS cert file: %v", err)
+		}
+		defer os.Remove(tmpCertFile.Name())
+		if _, err := tmpCertFile.Write(tlsCertData); err != nil {
+			tmpCertFile.Close()
+			log.Fatalf("Failed to write temporary TLS cert file: %v", err)
+		}
+		tmpCertFile.Close()
+		os.Chmod(tmpCertFile.Name(), 0644)
+
 		log.Printf("Starting HTTPS server on port %d", *port)
 		log.Printf("TLS key: %s", config.Server.TLSKeyFile)
 		log.Printf("TLS cert: %s", config.Server.TLSCertFile)
-		if err := server.ListenAndServeTLS(config.Server.TLSCertFile, config.Server.TLSKeyFile); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServeTLS(tmpCertFile.Name(), tmpKeyFile.Name()); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed: %v", err)
 		}
 	} else {
@@ -415,6 +482,73 @@ func validateTaskDir(taskDir string) error {
 	}
 
 	log.Printf("Task directory validated: %s (UID: %d, GID: %d, Permissions: %o)", taskDir, currentUID, currentGID, mode)
+	return nil
+}
+
+// findExecUser returns the default exec user
+func findExecUser() string {
+	return "www-data"
+}
+
+// lookupUser looks up a user by name and returns UID and GID
+func lookupUser(username string) (uid, gid int, err error) {
+	u, err := user.Lookup(username)
+	if err != nil {
+		return 0, 0, fmt.Errorf("user lookup failed: %w", err)
+	}
+
+	uidInt, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid UID: %w", err)
+	}
+
+	gidInt, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid GID: %w", err)
+	}
+
+	return uidInt, gidInt, nil
+}
+
+// dropPrivileges drops privileges to the specified user
+func dropPrivileges(username string) error {
+	// Get current user
+	currentUID := os.Getuid()
+	if currentUID != 0 {
+		// Not running as root, check if we're already the target user
+		currentUser, err := user.Current()
+		if err != nil {
+			return fmt.Errorf("failed to get current user: %w", err)
+		}
+		if currentUser.Username == username {
+			log.Printf("Already running as user %s (UID: %d)", username, currentUID)
+			return nil
+		}
+		return fmt.Errorf("cannot drop privileges: not running as root (current UID: %d, target user: %s)", currentUID, username)
+	}
+
+	// Lookup target user
+	uid, gid, err := lookupUser(username)
+	if err != nil {
+		return err
+	}
+
+	// Drop to target GID first
+	if err := syscall.Setgid(gid); err != nil {
+		return fmt.Errorf("failed to set GID to %d: %w", gid, err)
+	}
+
+	// Drop to target UID
+	if err := syscall.Setuid(uid); err != nil {
+		return fmt.Errorf("failed to set UID to %d: %w", uid, err)
+	}
+
+	// Verify the change
+	if os.Getuid() != uid || os.Getgid() != gid {
+		return fmt.Errorf("privilege drop verification failed: expected UID/GID %d/%d, got %d/%d", uid, gid, os.Getuid(), os.Getgid())
+	}
+
+	log.Printf("Dropped privileges to user %s (UID: %d, GID: %d)", username, uid, gid)
 	return nil
 }
 
