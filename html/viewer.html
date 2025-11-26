@@ -190,6 +190,203 @@
         let processCompleted = false;
         const maxReconnectAttempts = 5;
 
+        // ANSI color code to HTML converter
+        // Supports standard 8/16 colors and 256-color mode
+        const ansiColors = {
+            // Standard colors (30-37, 40-47)
+            '30': '#000000', '31': '#cd3131', '32': '#0dbc79', '33': '#e5e510',
+            '34': '#2472c8', '35': '#bc3fbc', '36': '#11a8cd', '37': '#e5e5e5',
+            '90': '#666666', '91': '#f14c4c', '92': '#23d18b', '93': '#f5f543',
+            '94': '#3b8eea', '95': '#d670d6', '96': '#29b8db', '97': '#e5e5e5',
+            // Background colors (40-47, 100-107)
+            '40': '#000000', '41': '#cd3131', '42': '#0dbc79', '43': '#e5e510',
+            '44': '#2472c8', '45': '#bc3fbc', '46': '#11a8cd', '47': '#e5e5e5',
+            '100': '#666666', '101': '#f14c4c', '102': '#23d18b', '103': '#f5f543',
+            '104': '#3b8eea', '105': '#d670d6', '106': '#29b8db', '107': '#e5e5e5',
+        };
+
+        // Extended 256-color palette (simplified - using xterm colors)
+        function get256Color(code) {
+            if (code < 16) {
+                // Standard colors
+                const std = ['#000000', '#800000', '#008000', '#808000', '#000080', '#800080', '#008080', '#c0c0c0',
+                           '#808080', '#ff0000', '#00ff00', '#ffff00', '#0000ff', '#ff00ff', '#00ffff', '#ffffff'];
+                return std[code] || '#ffffff';
+            } else if (code < 232) {
+                // 6x6x6 color cube
+                const r = Math.floor((code - 16) / 36);
+                const g = Math.floor(((code - 16) % 36) / 6);
+                const b = (code - 16) % 6;
+                const val = [0, 95, 135, 175, 215, 255];
+                return 'rgb(' + val[r] + ',' + val[g] + ',' + val[b] + ')';
+            } else {
+                // Grayscale
+                const gray = 8 + (code - 232) * 10;
+                return 'rgb(' + gray + ',' + gray + ',' + gray + ')';
+            }
+        }
+
+        function ansiToHtml(text) {
+            if (!text) return '';
+            
+            // Escape HTML first
+            const escapeHtml = (str) => {
+                const map = {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                };
+                return str.replace(/[&<>"']/g, m => map[m]);
+            };
+
+            let html = '';
+            let currentStyle = { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, strikethrough: false };
+            let i = 0;
+
+            while (i < text.length) {
+                if (text[i] === '\x1b' || text[i] === '\u001b') {
+                    // ANSI escape sequence
+                    if (text[i + 1] === '[') {
+                        i += 2;
+                        let sequence = '';
+                        while (i < text.length && text[i] !== 'm' && (text[i] < 'A' || text[i] > 'Z') && (text[i] < 'a' || text[i] > 'z')) {
+                            sequence += text[i];
+                            i++;
+                        }
+                        const terminator = i < text.length ? text[i] : '';
+                        if (terminator === 'm') {
+                            i++; // Skip 'm'
+                        }
+
+                        // Parse SGR (Select Graphic Rendition) codes
+                        const codes = sequence ? sequence.split(';').filter(c => c !== '') : ['0'];
+                        let codeIdx = 0;
+                        
+                        while (codeIdx < codes.length) {
+                            const num = parseInt(codes[codeIdx], 10);
+                            if (isNaN(num)) {
+                                codeIdx++;
+                                continue;
+                            }
+
+                            if (num === 0) {
+                                // Reset
+                                currentStyle = { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, strikethrough: false };
+                            } else if (num === 1) {
+                                currentStyle.bold = true;
+                            } else if (num === 2) {
+                                currentStyle.dim = true;
+                            } else if (num === 3) {
+                                currentStyle.italic = true;
+                            } else if (num === 4) {
+                                currentStyle.underline = true;
+                            } else if (num === 9) {
+                                currentStyle.strikethrough = true;
+                            } else if (num === 22) {
+                                currentStyle.bold = false;
+                                currentStyle.dim = false;
+                            } else if (num === 23) {
+                                currentStyle.italic = false;
+                            } else if (num === 24) {
+                                currentStyle.underline = false;
+                            } else if (num === 29) {
+                                currentStyle.strikethrough = false;
+                            } else if (num >= 30 && num <= 37) {
+                                currentStyle.fg = ansiColors[num] || null;
+                            } else if (num === 38) {
+                                // Extended foreground color: 38;5;n (256 colors) or 38;2;r;g;b (RGB)
+                                if (codeIdx + 1 < codes.length && parseInt(codes[codeIdx + 1], 10) === 5) {
+                                    // 256 color mode
+                                    if (codeIdx + 2 < codes.length) {
+                                        const colorCode = parseInt(codes[codeIdx + 2], 10);
+                                        currentStyle.fg = get256Color(colorCode);
+                                        codeIdx += 2;
+                                    }
+                                } else if (codeIdx + 1 < codes.length && parseInt(codes[codeIdx + 1], 10) === 2) {
+                                    // RGB mode: 38;2;r;g;b
+                                    if (codeIdx + 4 < codes.length) {
+                                        const r = parseInt(codes[codeIdx + 2], 10);
+                                        const g = parseInt(codes[codeIdx + 3], 10);
+                                        const b = parseInt(codes[codeIdx + 4], 10);
+                                        currentStyle.fg = 'rgb(' + r + ',' + g + ',' + b + ')';
+                                        codeIdx += 4;
+                                    }
+                                }
+                            } else if (num >= 40 && num <= 47) {
+                                currentStyle.bg = ansiColors[num] || null;
+                            } else if (num === 48) {
+                                // Extended background color: 48;5;n (256 colors) or 48;2;r;g;b (RGB)
+                                if (codeIdx + 1 < codes.length && parseInt(codes[codeIdx + 1], 10) === 5) {
+                                    // 256 color mode
+                                    if (codeIdx + 2 < codes.length) {
+                                        const colorCode = parseInt(codes[codeIdx + 2], 10);
+                                        currentStyle.bg = get256Color(colorCode);
+                                        codeIdx += 2;
+                                    }
+                                } else if (codeIdx + 1 < codes.length && parseInt(codes[codeIdx + 1], 10) === 2) {
+                                    // RGB mode: 48;2;r;g;b
+                                    if (codeIdx + 4 < codes.length) {
+                                        const r = parseInt(codes[codeIdx + 2], 10);
+                                        const g = parseInt(codes[codeIdx + 3], 10);
+                                        const b = parseInt(codes[codeIdx + 4], 10);
+                                        currentStyle.bg = 'rgb(' + r + ',' + g + ',' + b + ')';
+                                        codeIdx += 4;
+                                    }
+                                }
+                            } else if (num >= 90 && num <= 97) {
+                                currentStyle.fg = ansiColors[num] || null;
+                            } else if (num >= 100 && num <= 107) {
+                                currentStyle.bg = ansiColors[num] || null;
+                            }
+                            codeIdx++;
+                        }
+                        continue;
+                    } else {
+                        // Unknown escape sequence, skip
+                        i++;
+                        continue;
+                    }
+                }
+
+                // Regular character - apply current style
+                let char = text[i];
+                let styleStr = '';
+
+                if (currentStyle.fg) {
+                    styleStr += 'color:' + currentStyle.fg + ';';
+                }
+                if (currentStyle.bg) {
+                    styleStr += 'background-color:' + currentStyle.bg + ';';
+                }
+                if (currentStyle.bold) {
+                    styleStr += 'font-weight:bold;';
+                }
+                if (currentStyle.dim) {
+                    styleStr += 'opacity:0.5;';
+                }
+                if (currentStyle.italic) {
+                    styleStr += 'font-style:italic;';
+                }
+                if (currentStyle.underline) {
+                    styleStr += 'text-decoration:underline;';
+                }
+                if (currentStyle.strikethrough) {
+                    styleStr += 'text-decoration:line-through;';
+                }
+
+                if (styleStr) {
+                    html += '<span style="' + styleStr + '">' + escapeHtml(char) + '</span>';
+                } else {
+                    html += escapeHtml(char);
+                }
+                i++;
+            }
+
+            return html;
+        }
+
         function truncatePreview(text) {
             const normalized = text.replace(/\s+/g, ' ').trim();
             if (!normalized) return '';
@@ -243,11 +440,15 @@
                     try {
                         const data = JSON.parse(event.data);
                         if (data.type === 'stdout') {
-                            stdoutEl.textContent += data.data;
+                            // Convert ANSI codes to HTML for stdout
+                            const html = ansiToHtml(data.data);
+                            stdoutEl.insertAdjacentHTML('beforeend', html);
                             stdoutEl.scrollTop = stdoutEl.scrollHeight;
                             updateTab('stdout', data.data);
                         } else if (data.type === 'stderr') {
-                            stderrEl.textContent += data.data;
+                            // Convert ANSI codes to HTML for stderr
+                            const html = ansiToHtml(data.data);
+                            stderrEl.insertAdjacentHTML('beforeend', html);
                             stderrEl.scrollTop = stderrEl.scrollHeight;
                             updateTab('stderr', data.data);
                         } else if (data.type === 'system') {
@@ -255,6 +456,7 @@
                             if (data.pid) {
                                 msg += ' (PID: ' + data.pid + ')';
                             }
+                            // System messages don't need ANSI conversion
                             systemEl.textContent += msg + '\n';
                             systemEl.scrollTop = systemEl.scrollHeight;
                             updateTab('system', msg);

@@ -66,7 +66,7 @@ func (sc *safeConn) WriteMessage(messageType int, data []byte) error {
 // handleWebSocket handles WebSocket connections for live task output
 func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config, upgrader websocket.Upgrader) {
 	log.Printf("[WEBSOCKET] Connection attempt from %s", r.RemoteAddr)
-	
+
 	// Authenticate request
 	claims, err := validateJWT(r, config.Auth.Secret)
 	if err != nil {
@@ -253,7 +253,7 @@ func monitorProcess(ctx context.Context, safeConn *safeConn, taskManager *TaskMa
 			if !isProcessRunning(pid) {
 				// Process has ended, read exit code
 				exitCode := readExitCode(exitCodePath)
-				
+
 				// Send completion message
 				msg := fmt.Sprintf("Process ended with exit code: %d", exitCode)
 				sendSystemMessage(safeConn, "completed", msg, pid)
@@ -354,6 +354,8 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 	defer file.Close()
 
 	// Read existing content first
+	// Note: bufio.Scanner preserves ANSI escape sequences as they are part of the text
+	// ANSI codes (like \x1b[31m) will be included in scanner.Text() and sent to the client
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		select {
@@ -361,6 +363,7 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 			return
 		default:
 		}
+		// scanner.Text() preserves all bytes including ANSI escape sequences
 		msg := WebSocketMessage{
 			Type: outputType,
 			Data: scanner.Text() + "\n",
@@ -414,6 +417,7 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 				file.Seek(lastPos, io.SeekStart)
 
 				// Read new lines
+				// Note: ANSI escape sequences are preserved in scanner.Text()
 				scanner := bufio.NewScanner(file)
 				for scanner.Scan() {
 					select {
@@ -422,6 +426,7 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 						return
 					default:
 					}
+					// scanner.Text() preserves all bytes including ANSI escape sequences
 					msg := WebSocketMessage{
 						Type: outputType,
 						Data: scanner.Text() + "\n",
@@ -440,4 +445,3 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 		}
 	}
 }
-
