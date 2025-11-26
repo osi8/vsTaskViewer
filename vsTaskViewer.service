@@ -1,6 +1,6 @@
 [Unit]
 Description=vsTaskViewer - Task execution viewer with WebSocket support
-Documentation=https://github.com/yourorg/vsTaskViewer
+Documentation=https://github.com/osi8/vsTaskViewer
 After=network-online.target
 Wants=network-online.target
 Requires=network-online.target
@@ -20,7 +20,7 @@ ProtectHome=true
 # Allow writing to task directory
 ReadWritePaths=/var/vsTaskViewer
 # Allow reading from /etc/vsTaskViewer (config and HTML files) and TLS certificates
-ReadOnlyPaths=/etc/vsTaskViewer /etc/ssl/private /etc/ssl/certs /etc/letsencrypt
+ReadOnlyPaths=/etc/vsTaskViewer /etc/ssl /etc/letsencrypt
 
 # Restrict namespaces (prevent creating new namespaces)
 RestrictNamespaces=true
