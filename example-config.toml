@@ -39,3 +39,37 @@ description = "Task that generates some error output"
 command = "echo 'This is stdout' && echo 'This is stderr' >&2 && exit 0"
 max_execution_time = 60
 
+# Example task with parameters
+# Parameters are substituted in the command using {{param_name}} syntax
+[[tasks]]
+name = "parameterized-task"
+description = "Example task with parameters"
+command = "echo 'Processing file: {{filename}} with timeout: {{timeout}} seconds' && sleep {{timeout}} && echo 'Done'"
+max_execution_time = 300
+# Parameter definitions
+[[tasks.parameters]]
+name = "filename"
+type = "string"  # Parameter type: "int" or "string"
+optional = false  # Required parameter
+
+[[tasks.parameters]]
+name = "timeout"
+type = "int"  # Must be digits 0-9 only
+optional = true  # Optional parameter
+
+# Another example with only optional parameters
+[[tasks]]
+name = "optional-params-task"
+description = "Task with only optional parameters"
+command = "echo 'Message: {{message}}' && echo 'Count: {{count}}'"
+max_execution_time = 60
+[[tasks.parameters]]
+name = "message"
+type = "string"
+optional = true
+
+[[tasks.parameters]]
+name = "count"
+type = "int"
+optional = true
+

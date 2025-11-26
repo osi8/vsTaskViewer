@@ -12,7 +12,8 @@ import (
 
 // StartTaskRequest represents a request to start a task
 type StartTaskRequest struct {
-	TaskName string `json:"task_name"`
+	TaskName   string                 `json:"task_name"`
+	Parameters map[string]interface{} `json:"parameters,omitempty"` // Optional parameters for the task
 }
 
 // StartTaskResponse represents the response when starting a task
@@ -53,8 +54,8 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 		return
 	}
 
-	// Start the task
-	taskID, err := taskManager.StartTask(req.TaskName)
+	// Start the task with parameters
+	taskID, err := taskManager.StartTask(req.TaskName, req.Parameters)
 	if err != nil {
 		log.Printf("[API] Failed to start task '%s': %v", req.TaskName, err)
 		http.Error(w, fmt.Sprintf("Failed to start task: %v", err), http.StatusInternalServerError)

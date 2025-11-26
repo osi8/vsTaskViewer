@@ -212,6 +212,32 @@ func loadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("at least one task must be defined in config")
 	}
 
+	// Validate task configurations including parameters
+	for i, task := range config.Tasks {
+		if task.Name == "" {
+			return nil, fmt.Errorf("task at index %d has no name", i)
+		}
+		if task.Command == "" {
+			return nil, fmt.Errorf("task '%s' has no command", task.Name)
+		}
+
+		// Validate parameter definitions
+		paramNames := make(map[string]bool)
+		for j, param := range task.Parameters {
+			if param.Name == "" {
+				return nil, fmt.Errorf("task '%s' has parameter at index %d with no name", task.Name, j)
+			}
+			if param.Type != "int" && param.Type != "string" {
+				return nil, fmt.Errorf("task '%s' parameter '%s' has invalid type '%s' (must be 'int' or 'string')", task.Name, param.Name, param.Type)
+			}
+			// Check for duplicate parameter names
+			if paramNames[param.Name] {
+				return nil, fmt.Errorf("task '%s' has duplicate parameter name '%s'", task.Name, param.Name)
+			}
+			paramNames[param.Name] = true
+		}
+	}
+
 	// Note: HTML directory validation is done in main() after path resolution
 
 	return &config, nil

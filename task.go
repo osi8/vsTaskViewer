@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,7 +40,7 @@ func NewTaskManager(config *Config) *TaskManager {
 }
 
 // StartTask starts a predefined task using the `at` command
-func (tm *TaskManager) StartTask(taskName string) (string, error) {
+func (tm *TaskManager) StartTask(taskName string, parameters map[string]interface{}) (string, error) {
 	// Validate task name
 	if err := validateTaskName(taskName); err != nil {
 		return "", fmt.Errorf("invalid task name: %w", err)
@@ -58,6 +59,15 @@ func (tm *TaskManager) StartTask(taskName string) (string, error) {
 		return "", fmt.Errorf("task '%s' not found in configuration", taskName)
 	}
 
+	// Validate and process parameters
+	validatedParams, err := validateAndProcessParameters(taskConfig.Parameters, parameters)
+	if err != nil {
+		return "", fmt.Errorf("parameter validation failed: %w", err)
+	}
+
+	// Substitute parameters in command
+	command := substituteParameters(taskConfig.Command, validatedParams)
+
 	// Generate unique task ID
 	taskID := uuid.New().String()
 
@@ -75,7 +85,7 @@ func (tm *TaskManager) StartTask(taskName string) (string, error) {
 	// Escape command to prevent injection even if config is compromised
 	pidPath := filepath.Join(outputDir, "pid")
 	exitCodePath := filepath.Join(outputDir, "exitcode")
-	escapedCommand := escapeBashCommand(taskConfig.Command)
+	escapedCommand := escapeBashCommand(command)
 	wrapperScript := fmt.Sprintf(`#!/bin/bash
 set +e
 echo $$ > %s
@@ -142,5 +152,77 @@ func (tm *TaskManager) GetTask(taskID string) (*RunningTask, error) {
 	}
 
 	return task, nil
+}
+
+// validateAndProcessParameters validates all parameters according to their definitions
+// Returns a map of validated parameter values as strings
+func validateAndProcessParameters(paramDefs []ParameterConfig, providedParams map[string]interface{}) (map[string]string, error) {
+	validated := make(map[string]string)
+
+	// If no parameters are defined, ensure none are provided
+	if len(paramDefs) == 0 {
+		if len(providedParams) > 0 {
+			return nil, fmt.Errorf("task does not accept parameters, but %d parameter(s) were provided", len(providedParams))
+		}
+		return validated, nil
+	}
+
+	// Create a map of provided parameters for quick lookup
+	providedMap := make(map[string]interface{})
+	if providedParams != nil {
+		for k, v := range providedParams {
+			providedMap[k] = v
+		}
+	}
+
+	// Validate each defined parameter
+	for _, paramDef := range paramDefs {
+		value, provided := providedMap[paramDef.Name]
+
+		// Check if required parameter is missing
+		if !paramDef.Optional && !provided {
+			return nil, fmt.Errorf("required parameter '%s' (type %s) is missing", paramDef.Name, paramDef.Type)
+		}
+
+		// If optional and not provided, skip
+		if paramDef.Optional && !provided {
+			continue
+		}
+
+		// Validate the parameter value
+		validatedValue, err := validateParameterValue(paramDef.Name, paramDef.Type, value)
+		if err != nil {
+			return nil, err
+		}
+
+		validated[paramDef.Name] = validatedValue
+	}
+
+	// Check for unknown parameters (parameters provided but not defined)
+	for paramName := range providedMap {
+		found := false
+		for _, paramDef := range paramDefs {
+			if paramDef.Name == paramName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("unknown parameter '%s' provided (not defined in task configuration)", paramName)
+		}
+	}
+
+	return validated, nil
+}
+
+// substituteParameters substitutes parameter placeholders in the command
+// Placeholder format: {{param_name}}
+func substituteParameters(command string, parameters map[string]string) string {
+	result := command
+	for paramName, paramValue := range parameters {
+		placeholder := fmt.Sprintf("{{%s}}", paramName)
+		result = strings.ReplaceAll(result, placeholder, paramValue)
+	}
+	return result
 }
 

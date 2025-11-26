@@ -25,9 +25,17 @@ type AuthConfig struct {
 
 // TaskConfig defines a task that can be executed
 type TaskConfig struct {
-	Name            string `toml:"name"`
-	Command         string `toml:"command"`
-	Description     string `toml:"description"`
-	MaxExecutionTime int   `toml:"max_execution_time"` // Maximum execution time in seconds (0 = no limit)
+	Name            string           `toml:"name"`
+	Command         string           `toml:"command"`
+	Description     string           `toml:"description"`
+	MaxExecutionTime int             `toml:"max_execution_time"` // Maximum execution time in seconds (0 = no limit)
+	Parameters      []ParameterConfig `toml:"parameters"`        // Parameter definitions for the task
+}
+
+// ParameterConfig defines a parameter for a task
+type ParameterConfig struct {
+	Name     string `toml:"name"`     // Parameter name
+	Type     string `toml:"type"`     // Parameter type: "int" or "string"
+	Optional bool   `toml:"optional"` // Whether the parameter is optional
 }
 

@@ -5,12 +5,15 @@ vsTaskViewer ist eine Go-Anwendung, die vordefinierte Tasks über den Linux `at`
 ## Features
 
 - **Task-Management**: Startet vordefinierte Tasks über den `at`-Befehl
+- **Parametrisierte Tasks**: Tasks können mit typisierten Parametern (int/string) konfiguriert werden
 - **Web-Interface**: Minimalistisches HTML-Interface zur Live-Anzeige der Task-Ausgabe
 - **WebSocket-Support**: Live-Streaming von stdout und stderr über WebSocket
 - **JWT-Authentifizierung**: Alle Requests müssen mit einem gültigen JWT-Token authentifiziert werden
 - **Max Execution Time**: Automatische Beendigung von Tasks nach konfigurierbarer Zeit (SIGTERM → SIGKILL)
 - **Rate Limiting**: Schutz vor Brute-Force und DoS-Angriffen
+- **Request Size Limits**: Schutz vor zu großen Requests
 - **Optional TLS/HTTPS**: Unterstützung für verschlüsselte Verbindungen
+- **Health Check**: `/health` Endpunkt für Monitoring
 - **Single Binary**: Erstellt ein einzelnes Linux amd64 Binary
 
 ## Installation
@@ -82,11 +85,30 @@ command = "command to execute"
 # Maximum execution time in seconds (0 = no limit)
 # If exceeded, SIGTERM is sent, then SIGKILL after 30 seconds
 max_execution_time = 300
+
+# Tasks können parametrisiert werden
+# Parameter werden im Command mit {{param_name}} substituiert
+[[tasks]]
+name = "parameterized-task"
+description = "Task mit Parametern"
+command = "echo 'Processing {{filename}} with timeout {{timeout}}'"
+max_execution_time = 300
+# Parameter-Definitionen
+[[tasks.parameters]]
+name = "filename"
+type = "string"  # "int" oder "string"
+optional = false  # true = optional, false = erforderlich
+
+[[tasks.parameters]]
+name = "timeout"
+type = "int"
+optional = true
 ```
 
 ### HTML-Verzeichnis
 
 Das `html_dir` Verzeichnis muss folgende Dateien enthalten:
+
 - `viewer.html` - Haupt-Viewer-Seite (mit Template-Platzhaltern `{{.TaskID}}` und `{{.WebSocketURL}}`)
 - `400.html` - Bad Request Fehlerseite
 - `401.html` - Unauthorized Fehlerseite
@@ -143,10 +165,24 @@ tokenString, _ := token.SignedString([]byte("your-secret-key"))
 
 **2. Task über API starten**
 
+Task ohne Parameter:
 ```bash
 curl -X POST http://localhost:8080/api/start?token=YOUR_JWT_TOKEN \
   -H "Content-Type: application/json" \
   -d '{"task_name": "example-task"}'
+```
+
+Task mit Parametern:
+```bash
+curl -X POST http://localhost:8080/api/start?token=YOUR_JWT_TOKEN \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_name": "parameterized-task",
+    "parameters": {
+      "filename": "data.txt",
+      "timeout": 30
+    }
+  }'
 ```
 
 Antwort:
@@ -168,14 +204,25 @@ Antwort:
 Startet einen Task.
 
 **Query Parameter:**
+
 - `token`: JWT-Token (HS256)
 
 **Request Body:**
 ```json
 {
-  "task_name": "task-name"
+  "task_name": "task-name",
+  "parameters": {
+    "param1": "value1",
+    "param2": 42
+  }
 }
 ```
+
+
+- `task_name` (erforderlich): Name des Tasks aus der Konfiguration
+- `parameters` (optional): Map von Parameternamen zu Werten
+- String-Parameter: `"param": "value"`
+- Integer-Parameter: `"param": 42` oder `"param": "42"`
 
 **Response:**
 ```json
@@ -185,11 +232,17 @@ Startet einen Task.
 }
 ```
 
+**Fehler:**
+- `400 Bad Request`: Ungültige Parameter, fehlende erforderliche Parameter, ungültige Zeichen
+- `401 Unauthorized`: Ungültiges oder fehlendes JWT-Token
+- `500 Internal Server Error`: Task konnte nicht gestartet werden
+
 ### GET /viewer
 
 Zeigt die HTML-Viewer-Seite.
 
 **Query Parameter:**
+
 - `task_id`: Task-ID (UUID)
 - `token`: JWT-Token für Viewer-Zugriff
 
@@ -198,6 +251,7 @@ Zeigt die HTML-Viewer-Seite.
 WebSocket-Endpunkt für Live-Output.
 
 **Query Parameter:**
+
 - `task_id`: Task-ID (UUID)
 - `token`: JWT-Token
 
@@ -218,36 +272,211 @@ oder
 }
 ```
 
+### GET /health
+
+Health-Check-Endpunkt für Monitoring (keine Authentifizierung erforderlich).
+
+**Response:**
+```
+OK
+```
+
+Status Code: `200 OK`
+
 ## JWT-Token
 
 Alle Requests müssen ein JWT-Token im URL-Query-Parameter `token` enthalten.
 
 **Claims:**
+
 - `task_id` (optional): Task-Kennung
 - `exp`: Ablaufzeit (Unix Timestamp)
 
 **Signatur:**
+
 - Algorithmus: HS256
 - Secret: Aus der Konfiguration (`auth.secret`)
 
 ## Task-Ausgabe
 
 Tasks werden so ausgeführt, dass ihre Ausgabe in `/tmp/[task-id]/` gespeichert wird:
+
 - `/tmp/[task-id]/stdout`: Standard-Ausgabe
 - `/tmp/[task-id]/stderr`: Fehler-Ausgabe
+- `/tmp/[task-id]/pid`: Prozess-ID des laufenden Tasks
+- `/tmp/[task-id]/exitcode`: Exit-Code nach Beendigung
+- `/tmp/[task-id]/run.sh`: Wrapper-Script (wird automatisch erstellt)
 
 Der WebSocket-Endpunkt liest diese Dateien kontinuierlich und sendet neue Zeilen an den Client.
 
+**Hinweis**: Die Verzeichnisse haben Berechtigungen `0700` (nur Owner-Zugriff) für zusätzliche Sicherheit.
+
+## Task-Timeouts
+
+Jeder Task kann eine maximale Ausführungszeit (`max_execution_time`) in Sekunden definieren:
+
+- `0` = Kein Timeout (Task läuft unbegrenzt)
+- `> 0` = Maximale Ausführungszeit in Sekunden
+
+**Timeout-Verhalten:**
+
+1. Wenn die maximale Ausführungszeit überschritten wird:
+   - Es wird `SIGTERM` an den Prozess gesendet (graceful shutdown)
+   - Eine Systemnachricht wird über WebSocket gesendet
+   
+2. Nach 30 Sekunden:
+   - Wenn der Prozess noch läuft, wird `SIGKILL` gesendet (force kill)
+   - Eine weitere Systemnachricht wird über WebSocket gesendet
+
+**Beispiel:**
+```toml
+[[tasks]]
+name = "limited-task"
+command = "long-running-script.sh"
+max_execution_time = 300  # 5 Minuten
+```
+
+Systemnachrichten im WebSocket:
+```json
+{
+  "type": "timeout",
+  "data": "Process exceeded maximum execution time. Sending SIGTERM (graceful shutdown)...",
+  "pid": 12345
+}
+```
+
+## Task-Parametrisierung
+
+Tasks können mit typisierten Parametern konfiguriert werden, die im Command substituiert werden.
+
+### Parameter-Definition
+
+Parameter werden in der Task-Konfiguration definiert:
+
+```toml
+[[tasks.parameters]]
+name = "param_name"
+type = "int"      # oder "string"
+optional = false  # true = optional, false = erforderlich
+```
+
+### Parameter-Typen
+
+- **int**: Nur Ziffern 0-9 erlaubt
+- **string**: Nur folgende Zeichen erlaubt: `-a-zA-Z0-9_:,.` (Bindestrich, Buchstaben, Ziffern, Unterstrich, Doppelpunkt, Komma, Punkt)
+
+### Parameter-Substitution
+
+Parameter werden im Command mit der Syntax `{{param_name}}` substituiert:
+
+```toml
+command = "echo 'Processing {{filename}} with timeout {{timeout}}'"
+```
+
+### Validierung
+
+- **Erforderliche Parameter**: Fehlen erforderliche Parameter, wird der Request mit `400 Bad Request` abgelehnt
+- **Typ-Validierung**: Parameter müssen dem definierten Typ entsprechen
+- **Zeichen-Validierung**: Ungültige Zeichen führen zu `400 Bad Request` mit entsprechender Fehlermeldung
+- **Unbekannte Parameter**: Nicht definierte Parameter werden abgelehnt
+- **Sicherheit**: Die strikte Validierung verhindert Command-Injection durch Parameter
+
+### Beispiele
+
+**Task mit erforderlichem String-Parameter:**
+```toml
+[[tasks]]
+name = "process-file"
+command = "cat {{filepath}}"
+[[tasks.parameters]]
+name = "filepath"
+type = "string"
+optional = false
+```
+
+**Task mit optionalen Parametern:**
+```toml
+[[tasks]]
+name = "custom-task"
+command = "echo '{{message}}' && sleep {{duration}}"
+[[tasks.parameters]]
+name = "message"
+type = "string"
+optional = true
+[[tasks.parameters]]
+name = "duration"
+type = "int"
+optional = true
+```
+
+**API-Aufruf:**
+```bash
+curl -X POST http://localhost:8080/api/start?token=TOKEN \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_name": "process-file",
+    "parameters": {
+      "filepath": "/path/to/file.txt"
+    }
+  }'
+```
+
+### Fehlerbehandlung bei Parametern
+
+Bei fehlerhaften Parametern wird ein `400 Bad Request` mit einer beschreibenden Fehlermeldung zurückgegeben:
+
+**Fehlende erforderliche Parameter:**
+```json
+{
+  "error": "parameter validation failed: required parameter 'filename' (type string) is missing"
+}
+```
+
+**Ungültige Zeichen in int-Parameter:**
+```json
+{
+  "error": "parameter validation failed: parameter 'timeout' (type int) contains invalid characters. Only digits 0-9 are allowed, got: 30abc"
+}
+```
+
+**Ungültige Zeichen in string-Parameter:**
+```json
+{
+  "error": "parameter validation failed: parameter 'filename' (type string) contains invalid characters. Only [-a-zA-Z0-9_:,.] are allowed, got: /path/to/file"
+}
+```
+
+**Unbekannte Parameter:**
+```json
+{
+  "error": "parameter validation failed: unknown parameter 'unknown_param' provided (not defined in task configuration)"
+}
+```
+
+**Falscher Typ:**
+```json
+{
+  "error": "parameter validation failed: parameter 'timeout' must be of type 'int', got string"
+}
+```
+
 ## Sicherheit
 
-- **JWT-Authentifizierung**: Alle Endpunkte erfordern gültige JWT-Tokens
+- **JWT-Authentifizierung**: Alle Endpunkte (außer `/health`) erfordern gültige JWT-Tokens
 - **Vordefinierte Tasks**: Nur in der Konfiguration definierte Tasks können gestartet werden
 - **Token-Validierung**: Expiration und Signatur werden geprüft
+- **Parameter-Validierung**: Strikte Typ- und Zeichen-Validierung verhindert Command-Injection
+- **Rate Limiting**: Schutz vor Brute-Force und DoS-Angriffen
+- **Request Size Limits**: Schutz vor zu großen Requests (Standard: 10MB)
+- **Command Escaping**: Commands werden sicher escaped, um Injection zu verhindern
 
 **Wichtig für Produktion:**
+
 - Verwenden Sie ein starkes, zufälliges Secret in der Konfiguration
 - Verwenden Sie HTTPS in Produktion
 - Beschränken Sie den Zugriff auf die API
+- Überprüfen Sie alle Task-Definitionen und Parameter-Validierungen
+- Verwenden Sie optionale Parameter nur wenn nötig
 
 ## Abhängigkeiten
 
