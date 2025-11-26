@@ -64,9 +64,46 @@ sudo mkdir -p /etc/vsTaskViewer/html
 sudo cp example-config.toml /etc/vsTaskViewer/vsTaskViewer.toml
 sudo cp -r html/* /etc/vsTaskViewer/html/
 sudo nano /etc/vsTaskViewer/vsTaskViewer.toml
+
+# Binary installieren
+sudo cp vsTaskViewer /usr/local/bin/
+sudo chmod +x /usr/local/bin/vsTaskViewer
+
+# Task-Verzeichnis erstellen
+sudo mkdir -p /var/vsTaskViewer
+sudo chown www-data:www-data /var/vsTaskViewer
+sudo chmod 700 /var/vsTaskViewer
 ```
 
 **Wichtig**: Ändern Sie das `auth.secret` in der Konfiguration!
+
+### Systemd Service Installation
+
+Ein systemd Service-File ist im Repository enthalten (`vsTaskViewer.service`):
+
+```bash
+# Service-File installieren
+sudo cp vsTaskViewer.service /etc/systemd/system/
+
+# Service aktivieren und starten
+sudo systemctl daemon-reload
+sudo systemctl enable vsTaskViewer
+sudo systemctl start vsTaskViewer
+
+# Status prüfen
+sudo systemctl status vsTaskViewer
+
+# Logs anzeigen
+sudo journalctl -u vsTaskViewer -f
+```
+
+**Sicherheitshinweise für den systemd Service:**
+
+- Der Service startet als `root` und reduziert automatisch die Rechte auf `www-data`
+- Strikte Sicherheitseinstellungen sind aktiviert (ProtectSystem, NoNewPrivileges, etc.)
+- Der Service benötigt `CAP_NET_BIND_SERVICE` für Ports < 1024 und `CAP_CHOWN` für Verzeichnis-Erstellung
+- Nur `/var/vsTaskViewer` ist schreibbar, alle anderen Pfade sind read-only
+- PrivateTmp verhindert Zugriff auf temporäre Dateien anderer Prozesse
 
 ## Konfiguration
 
@@ -532,9 +569,14 @@ Die Anwendung folgt einer spezifischen Startup-Reihenfolge für maximale Sicherh
 
 - Verwenden Sie ein starkes, zufälliges Secret in der Konfiguration
 - Verwenden Sie HTTPS in Produktion
-- Beschränken Sie den Zugriff auf die API
+- Beschränken Sie den Zugriff auf die API (Firewall, Reverse Proxy)
 - Überprüfen Sie alle Task-Definitionen und Parameter-Validierungen
 - Verwenden Sie optionale Parameter nur wenn nötig
+- Konfigurieren Sie eine Firewall, um den Zugriff auf den Port zu beschränken
+- Verwenden Sie einen Reverse Proxy (z.B. nginx) für zusätzliche Sicherheit
+- Überwachen Sie die Logs regelmäßig auf verdächtige Aktivitäten
+- Begrenzen Sie die Anzahl der gleichzeitigen Tasks in der Konfiguration
+- Verwenden Sie Rate Limiting (in der Konfiguration aktiviert)
 
 ## Abhängigkeiten
 
