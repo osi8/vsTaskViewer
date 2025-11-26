@@ -18,6 +18,7 @@ import (
 var (
 	configPathFlag   = flag.String("c", "", "Path to configuration file (optional)")
 	templatesPathFlag = flag.String("t", "", "Path to templates/HTML directory (optional)")
+	taskDirFlag      = flag.String("d", "", "Path to task output directory (optional)")
 	port             = flag.Int("p", 8080, "Port to listen on")
 	showHelp         = flag.Bool("h", false, "Show help message")
 )
@@ -40,6 +41,12 @@ Options:
                  2. html/ in same directory as binary
                  3. /etc/vsTaskViewer/html/
 
+  -d string    Path to task output directory (optional)
+               Search order:
+                 1. Path specified with -d flag
+                 2. task_dir from config file
+                 3. /var/vsTaskViewer
+
   -p int       Port to listen on (default: 8080, can be overridden in config)
   -h           Show this help message
 
@@ -47,6 +54,7 @@ Examples:
   vsTaskViewer
   vsTaskViewer -c /path/to/config.toml
   vsTaskViewer -c /path/to/config.toml -t /path/to/html
+  vsTaskViewer -c /path/to/config.toml -d /var/vsTaskViewer
   vsTaskViewer -p 9090
 `
 
@@ -103,6 +111,39 @@ func main() {
 	// Validate HTML directory exists (after resolving paths)
 	if _, err := os.Stat(config.Server.HTMLDir); os.IsNotExist(err) {
 		log.Fatalf("HTML directory does not exist: %s", config.Server.HTMLDir)
+	}
+
+	// Override task directory if -d flag is set, otherwise use search order
+	if *taskDirFlag != "" {
+		// Resolve relative paths to absolute
+		taskDir, err := filepath.Abs(*taskDirFlag)
+		if err != nil {
+			log.Fatalf("Failed to resolve task directory path: %v", err)
+		}
+		config.Server.TaskDir = taskDir
+		log.Printf("Using task directory from -d flag: %s", config.Server.TaskDir)
+	} else if config.Server.TaskDir == "" {
+		taskDir, err := findTaskDir()
+		if err != nil {
+			log.Fatalf("Failed to find task directory: %v", err)
+		}
+		config.Server.TaskDir = taskDir
+		log.Printf("Using task directory: %s", config.Server.TaskDir)
+	} else {
+		// TaskDir is set in config, resolve relative paths
+		if !filepath.IsAbs(config.Server.TaskDir) {
+			taskDir, err := filepath.Abs(config.Server.TaskDir)
+			if err != nil {
+				log.Fatalf("Failed to resolve task directory path: %v", err)
+			}
+			config.Server.TaskDir = taskDir
+		}
+		log.Printf("Using task directory from config: %s", config.Server.TaskDir)
+	}
+
+	// Validate task directory (check/create, ownership, permissions)
+	if err := validateTaskDir(config.Server.TaskDir); err != nil {
+		log.Fatalf("Task directory validation failed: %v", err)
 	}
 
 	// Override port from config if specified
@@ -309,5 +350,71 @@ func findTemplatesDir() (string, error) {
 	}
 
 	return "", fmt.Errorf("templates directory not found in any of the search locations:\n  1. -t flag path\n  2. %s/html\n  3. %s", binaryDir, systemTemplates)
+}
+
+// findTaskDir searches for the task directory in the specified order
+func findTaskDir() (string, error) {
+	// Default to /var/vsTaskViewer
+	defaultTaskDir := "/var/vsTaskViewer"
+	if _, err := os.Stat(defaultTaskDir); err == nil {
+		return defaultTaskDir, nil
+	}
+
+	return defaultTaskDir, nil // Return default even if it doesn't exist yet (will be created in validation)
+}
+
+// validateTaskDir validates the task directory:
+// - Checks if directory exists or can be created
+// - Verifies ownership matches process executor
+// - Verifies permissions are 700
+func validateTaskDir(taskDir string) error {
+	// Get current user info
+	currentUID := os.Getuid()
+	currentGID := os.Getgid()
+
+	// Check if directory exists
+	info, err := os.Stat(taskDir)
+	if os.IsNotExist(err) {
+		// Try to create directory with 0700 permissions
+		if err := os.MkdirAll(taskDir, 0700); err != nil {
+			return fmt.Errorf("cannot create task directory %s: %w", taskDir, err)
+		}
+		log.Printf("Created task directory: %s", taskDir)
+		// Re-stat to get info about newly created directory
+		info, err = os.Stat(taskDir)
+		if err != nil {
+			return fmt.Errorf("failed to stat newly created directory: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("cannot access task directory %s: %w", taskDir, err)
+	}
+
+	// Check if it's actually a directory
+	if !info.IsDir() {
+		return fmt.Errorf("task directory path %s exists but is not a directory", taskDir)
+	}
+
+	// Check ownership (must match current user)
+	sys := info.Sys()
+	if sys != nil {
+		if stat, ok := sys.(*syscall.Stat_t); ok {
+			if int(stat.Uid) != currentUID {
+				return fmt.Errorf("task directory %s is owned by UID %d, but process is running as UID %d", taskDir, stat.Uid, currentUID)
+			}
+			if int(stat.Gid) != currentGID {
+				return fmt.Errorf("task directory %s is owned by GID %d, but process is running as GID %d", taskDir, stat.Gid, currentGID)
+			}
+		}
+	}
+
+	// Check permissions (must be 700)
+	mode := info.Mode().Perm()
+	expectedMode := os.FileMode(0700)
+	if mode != expectedMode {
+		return fmt.Errorf("task directory %s has permissions %o, but must be %o (700)", taskDir, mode, expectedMode)
+	}
+
+	log.Printf("Task directory validated: %s (UID: %d, GID: %d, Permissions: %o)", taskDir, currentUID, currentGID, mode)
+	return nil
 }
 

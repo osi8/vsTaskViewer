@@ -44,6 +44,12 @@ Das Templates-Verzeichnis (HTML-Dateien) wird in folgender Reihenfolge gesucht:
 2. `html/` im gleichen Verzeichnis wie die Binary
 3. `/etc/vsTaskViewer/html/`
 
+Das Task-Ausgabe-Verzeichnis wird in folgender Reihenfolge gesucht:
+
+1. Pfad angegeben mit `-d` Flag
+2. `task_dir` aus der Konfigurationsdatei
+3. `/var/vsTaskViewer` (Standard)
+
 **Beispiel-Installation:**
 
 ```bash
@@ -65,6 +71,9 @@ Die Konfigurationsdatei `/etc/vsTaskViewer.toml` hat folgende Struktur:
 port = 8080
 # Pfad zum HTML-Verzeichnis (muss existieren)
 html_dir = "./html"
+# Pfad zum Task-Ausgabe-Verzeichnis (Standard: /var/vsTaskViewer)
+# Muss im Besitz des ausführenden Benutzers sein und Berechtigungen 700 haben
+# task_dir = "/var/vsTaskViewer"
 # Rate Limiting: Requests pro Minute pro IP (0 = deaktiviert)
 rate_limit_rpm = 60
 # Maximale Request-Größe in Bytes (0 = Standard 10MB)
@@ -138,11 +147,14 @@ Alle HTML-Dateien enthalten inline CSS und JavaScript.
 # Mit spezifischem Templates-Verzeichnis
 ./vsTaskViewer -t /path/to/html
 
+# Mit spezifischem Task-Ausgabe-Verzeichnis
+./vsTaskViewer -d /var/vsTaskViewer
+
 # Mit spezifischem Port
 ./vsTaskViewer -p 9090
 
 # Kombiniert
-./vsTaskViewer -c /path/to/config.toml -t /path/to/html -p 9090
+./vsTaskViewer -c /path/to/config.toml -t /path/to/html -d /var/vsTaskViewer -p 9090
 ```
 
 ### Task starten
@@ -309,17 +321,23 @@ Alle Requests müssen ein JWT-Token im URL-Query-Parameter `token` enthalten.
 
 ## Task-Ausgabe
 
-Tasks werden so ausgeführt, dass ihre Ausgabe in `/tmp/[task-id]/` gespeichert wird:
+Tasks werden so ausgeführt, dass ihre Ausgabe in einem konfigurierbaren Verzeichnis gespeichert wird (Standard: `/var/vsTaskViewer/[task-id]/`):
 
-- `/tmp/[task-id]/stdout`: Standard-Ausgabe
-- `/tmp/[task-id]/stderr`: Fehler-Ausgabe
-- `/tmp/[task-id]/pid`: Prozess-ID des laufenden Tasks
-- `/tmp/[task-id]/exitcode`: Exit-Code nach Beendigung
-- `/tmp/[task-id]/run.sh`: Wrapper-Script (wird automatisch erstellt)
+- `[task-dir]/[task-id]/stdout`: Standard-Ausgabe
+- `[task-dir]/[task-id]/stderr`: Fehler-Ausgabe
+- `[task-dir]/[task-id]/pid`: Prozess-ID des laufenden Tasks
+- `[task-dir]/[task-id]/exitcode`: Exit-Code nach Beendigung
+- `[task-dir]/[task-id]/run.sh`: Wrapper-Script (wird automatisch erstellt)
 
 Der WebSocket-Endpunkt liest diese Dateien kontinuierlich und sendet neue Zeilen an den Client.
 
-**Hinweis**: Die Verzeichnisse haben Berechtigungen `0700` (nur Owner-Zugriff) für zusätzliche Sicherheit.
+**Sicherheit:**
+- Die Verzeichnisse haben Berechtigungen `0700` (nur Owner-Zugriff) für zusätzliche Sicherheit
+- Beim Start wird das Task-Ausgabe-Verzeichnis validiert:
+  - Das Verzeichnis muss existieren oder mit den Rechten des ausführenden Benutzers erstellt werden können
+  - Das Verzeichnis muss im Besitz des ausführenden Benutzers sein (UID/GID)
+  - Das Verzeichnis muss Berechtigungen `700` haben
+  - Bei Fehlern wird die Anwendung mit einer Fehlermeldung beendet
 
 ## Task-Timeouts
 

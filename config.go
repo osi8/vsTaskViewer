@@ -11,6 +11,7 @@ type Config struct {
 type ServerConfig struct {
 	Port            int      `toml:"port"`
 	HTMLDir         string   `toml:"html_dir"`
+	TaskDir         string   `toml:"task_dir"`         // Path to task output directory
 	AllowedOrigins  []string `toml:"allowed_origins"` // For WebSocket CORS
 	RateLimitRPM    int      `toml:"rate_limit_rpm"`  // Requests per minute per IP (0 = disabled)
 	MaxRequestSize  int64    `toml:"max_request_size"` // Max request body size in bytes (0 = default 10MB)

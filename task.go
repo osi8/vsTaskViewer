@@ -72,7 +72,7 @@ func (tm *TaskManager) StartTask(taskName string, parameters map[string]interfac
 	taskID := uuid.New().String()
 
 	// Create output directory with restrictive permissions (0700)
-	outputDir := filepath.Join("/tmp", taskID)
+	outputDir := filepath.Join(tm.config.Server.TaskDir, taskID)
 	if err := os.MkdirAll(outputDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -86,16 +86,17 @@ func (tm *TaskManager) StartTask(taskName string, parameters map[string]interfac
 	pidPath := filepath.Join(outputDir, "pid")
 	exitCodePath := filepath.Join(outputDir, "exitcode")
 	escapedCommand := escapeBashCommand(command)
+	escapedOutputDir := escapeBashCommand(outputDir)
 	wrapperScript := fmt.Sprintf(`#!/bin/bash
 set +e
 echo $$ > %s
-cd /tmp/%s
+cd %s
 exec > %s 2> %s
 bash -c %s
 EXIT_CODE=$?
 echo $EXIT_CODE > %s
 exit $EXIT_CODE
-`, pidPath, taskID, stdoutPath, stderrPath, escapedCommand, exitCodePath)
+`, pidPath, escapedOutputDir, stdoutPath, stderrPath, escapedCommand, exitCodePath)
 
 	scriptPath := filepath.Join(outputDir, "run.sh")
 	// Use 0700 permissions (owner only) instead of 0755
