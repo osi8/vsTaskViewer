@@ -38,8 +38,9 @@ func sendJSONError(w http.ResponseWriter, statusCode int, message string) {
 func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config) {
 	log.Printf("[API] Start task request from %s", r.RemoteAddr)
 	
-	// Authenticate request
-	_, err := validateJWT(r, config.Auth.Secret)
+	// Authenticate request - API tokens should have no audience or empty audience
+	apiAudience := ""
+	_, err := validateJWT(r, config.Auth.Secret, &apiAudience)
 	if err != nil {
 		log.Printf("[API] Authentication failed: %v", err)
 		sendJSONError(w, http.StatusUnauthorized, fmt.Sprintf("Unauthorized: %v", err))
@@ -99,11 +100,13 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 }
 
 // generateViewerToken generates a JWT token for viewer access
+// The token includes AUD="viewer" to prevent its use for API requests
 func generateViewerToken(taskID, secret string, expiration time.Duration) (string, error) {
 	claims := &Claims{
 		TaskID: taskID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiration)),
+			Audience:  []string{"viewer"}, // Set audience to "viewer" to prevent API token reuse
 		},
 	}
 

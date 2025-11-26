@@ -292,11 +292,20 @@ Alle Requests müssen ein JWT-Token im URL-Query-Parameter `token` enthalten.
 
 - `task_id` (optional): Task-Kennung
 - `exp`: Ablaufzeit (Unix Timestamp)
+- `aud` (Audience): Token-Typ zur Verhinderung von Token-Reuse
+  - **API-Tokens**: Kein `aud` Claim oder leerer `aud` Claim
+  - **Viewer-Tokens**: `aud="viewer"` - können nur für Viewer/WebSocket-Endpunkte verwendet werden
 
 **Signatur:**
 
 - Algorithmus: HS256
 - Secret: Aus der Konfiguration (`auth.secret`)
+
+**Sicherheit:**
+
+- Viewer-Tokens haben `aud="viewer"` und können **nicht** für API-Requests verwendet werden
+- API-Tokens haben kein `aud` Claim und können **nicht** für Viewer/WebSocket-Endpunkte verwendet werden
+- Dies verhindert, dass Viewer-Tokens für neue API-Requests missbraucht werden
 
 ## Task-Ausgabe
 

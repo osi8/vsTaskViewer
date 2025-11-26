@@ -67,8 +67,9 @@ func (sc *safeConn) WriteMessage(messageType int, data []byte) error {
 func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config, upgrader websocket.Upgrader) {
 	log.Printf("[WEBSOCKET] Connection attempt from %s", r.RemoteAddr)
 
-	// Authenticate request
-	claims, err := validateJWT(r, config.Auth.Secret)
+	// Authenticate request - Viewer tokens must have audience="viewer"
+	viewerAudience := "viewer"
+	claims, err := validateJWT(r, config.Auth.Secret, &viewerAudience)
 	if err != nil {
 		log.Printf("[WEBSOCKET] Authentication failed: %v", err)
 		w.Header().Set("Content-Type", "application/json")

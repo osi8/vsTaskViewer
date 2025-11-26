@@ -16,7 +16,8 @@ type Claims struct {
 }
 
 // validateJWT validates the JWT token from the request
-func validateJWT(r *http.Request, secret string) (*Claims, error) {
+// expectedAudience: "" or empty string for API tokens, "viewer" for viewer tokens, nil to skip audience validation
+func validateJWT(r *http.Request, secret string, expectedAudience *string) (*Claims, error) {
 	tokenStr := r.URL.Query().Get("token")
 	if tokenStr == "" {
 		return nil, errors.New("missing token parameter")
@@ -43,13 +44,32 @@ func validateJWT(r *http.Request, secret string) (*Claims, error) {
 		return nil, errors.New("token expired")
 	}
 
+	// Validate audience (AUD claim)
+	if expectedAudience != nil {
+		// If expectedAudience is set, token must have matching audience
+		// Empty string means API token (no audience or empty audience)
+		// "viewer" means viewer token (must have audience="viewer")
+		if *expectedAudience == "" {
+			// API token: should have no audience or empty audience
+			if len(claims.Audience) > 0 && claims.Audience[0] != "" {
+				return nil, errors.New("token audience mismatch: API token expected")
+			}
+		} else {
+			// Viewer token: must have matching audience
+			if len(claims.Audience) == 0 || claims.Audience[0] != *expectedAudience {
+				return nil, fmt.Errorf("token audience mismatch: expected %s", *expectedAudience)
+			}
+		}
+	}
+
 	return claims, nil
 }
 
 // authMiddleware wraps a handler with JWT authentication
-func authMiddleware(handler http.HandlerFunc, secret string) http.HandlerFunc {
+// expectedAudience: "" for API tokens, "viewer" for viewer tokens, nil to skip audience validation
+func authMiddleware(handler http.HandlerFunc, secret string, expectedAudience *string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, err := validateJWT(r, secret)
+		_, err := validateJWT(r, secret, expectedAudience)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Unauthorized: %v", err), http.StatusUnauthorized)
 			return

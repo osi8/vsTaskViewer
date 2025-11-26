@@ -11,8 +11,9 @@ import (
 func handleViewer(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config) {
 	log.Printf("[VIEWER] Viewer accessed from %s", r.RemoteAddr)
 	
-	// Authenticate request
-	claims, err := validateJWT(r, config.Auth.Secret)
+	// Authenticate request - Viewer tokens must have audience="viewer"
+	viewerAudience := "viewer"
+	claims, err := validateJWT(r, config.Auth.Secret, &viewerAudience)
 	if err != nil {
 		log.Printf("[VIEWER] Authentication failed: %v", err)
 		serveErrorHTML(w, http.StatusUnauthorized, config.Server.HTMLDir)
