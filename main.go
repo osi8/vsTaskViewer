@@ -190,7 +190,14 @@ func main() {
 		log.Printf("Loaded TLS files (key: %s, cert: %s)", config.Server.TLSKeyFile, config.Server.TLSCertFile)
 	}
 
-	// Drop privileges to exec user (after loading TLS files)
+	// Load HTML files early (before dropping privileges, as /etc/vsTaskViewer/html belongs to root)
+	htmlCache, err := NewHTMLCache(config.Server.HTMLDir)
+	if err != nil {
+		log.Fatalf("Failed to load HTML files: %v", err)
+	}
+	log.Printf("Loaded HTML files from %s", config.Server.HTMLDir)
+
+	// Drop privileges to exec user (after loading TLS and HTML files)
 	if err := dropPrivileges(config.Server.ExecUser); err != nil {
 		log.Fatalf("Failed to drop privileges: %v", err)
 	}
@@ -202,6 +209,9 @@ func main() {
 
 	// Initialize task manager
 	taskManager := NewTaskManager(config)
+
+	// Initialize WebSocket manager
+	wsManager := NewWebSocketManager()
 
 	// Create WebSocket upgrader with CORS settings
 	upgrader := createUpgrader(config.Server.AllowedOrigins)
@@ -226,12 +236,12 @@ func main() {
 
 	// Viewer endpoint (with rate limiting)
 	mux.HandleFunc("/viewer", RateLimitMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		handleViewer(w, r, taskManager, config)
+		handleViewer(w, r, taskManager, config, htmlCache)
 	}, rateLimiter))
 
 	// WebSocket endpoint (with rate limiting)
 	mux.HandleFunc("/ws", RateLimitMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		handleWebSocket(w, r, taskManager, config, upgrader)
+		handleWebSocket(w, r, taskManager, config, upgrader, wsManager)
 	}, rateLimiter))
 
 	// Health check endpoint (no rate limiting)
@@ -256,12 +266,22 @@ func main() {
 		<-sigint
 
 		log.Println("Shutting down server...")
+		
+		// Notify all WebSocket connections
+		wsManager.BroadcastShutdown("Server stopped, closing connection")
+		
+		// Cleanup all task directories
+		taskManager.CleanupAllTasks()
+		
+		// Shutdown HTTP server
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		if err := server.Shutdown(ctx); err != nil {
 			log.Printf("Server shutdown error: %v", err)
 		}
+		
+		log.Println("Server shutdown complete")
 	}()
 
 	// Start server with or without TLS

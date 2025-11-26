@@ -64,7 +64,7 @@ func (sc *safeConn) WriteMessage(messageType int, data []byte) error {
 }
 
 // handleWebSocket handles WebSocket connections for live task output
-func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config, upgrader websocket.Upgrader) {
+func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config, upgrader websocket.Upgrader, wsManager *WebSocketManager) {
 	log.Printf("[WEBSOCKET] Connection attempt from %s", r.RemoteAddr)
 
 	// Authenticate request - Viewer tokens must have audience="viewer"
@@ -117,6 +117,10 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	// Wrap connection for thread-safe writes
 	safeConn := &safeConn{conn: conn}
 
+	// Register connection with manager
+	wsManager.Add(safeConn)
+	defer wsManager.Remove(safeConn)
+
 	// Paths to output files
 	stdoutPath := filepath.Join(task.OutputDir, "stdout")
 	stderrPath := filepath.Join(task.OutputDir, "stderr")
@@ -126,7 +130,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	// Try to read PID and send initial message
 	pid := readPID(pidPath)
 	if pid > 0 {
-		sendSystemMessage(safeConn, "connected", fmt.Sprintf("WebSocket connected. Process started"), pid)
+		sendSystemMessage(safeConn, "connected", "WebSocket connected. Process started", pid)
 		log.Printf("[WEBSOCKET] Sent initial message with PID=%d for task_id=%s", pid, taskID)
 	} else {
 		sendSystemMessage(safeConn, "connected", "WebSocket connected. Waiting for process to start...", 0)
@@ -338,7 +342,7 @@ func tailFile(ctx context.Context, safeConn *safeConn, filePath, outputType, tas
 		// File doesn't exist yet, send waiting message
 		msg := WebSocketMessage{
 			Type: outputType,
-			Data: fmt.Sprintf("Waiting for output file..."),
+			Data: "Waiting for output file...",
 		}
 		if data, err := json.Marshal(msg); err == nil {
 			safeConn.WriteMessage(websocket.TextMessage, data)

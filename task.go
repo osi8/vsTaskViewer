@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,13 +24,13 @@ type TaskManager struct {
 
 // RunningTask represents a currently running task
 type RunningTask struct {
-	ID              string
-	TaskName        string
-	StartTime       time.Time
-	OutputDir       string
+	ID               string
+	TaskName         string
+	StartTime        time.Time
+	OutputDir        string
 	MaxExecutionTime time.Duration // Maximum execution time (0 = no limit)
-	Terminated      bool          // Whether SIGTERM has been sent
-	Killed          bool          // Whether SIGKILL has been sent
+	Terminated       bool          // Whether SIGTERM has been sent
+	Killed           bool          // Whether SIGKILL has been sent
 }
 
 // NewTaskManager creates a new task manager
@@ -39,7 +41,7 @@ func NewTaskManager(config *Config) *TaskManager {
 	}
 }
 
-// StartTask starts a predefined task using the `at` command
+// StartTask starts a predefined task as a background process
 func (tm *TaskManager) StartTask(taskName string, parameters map[string]interface{}) (string, error) {
 	// Validate task name
 	if err := validateTaskName(taskName); err != nil {
@@ -104,16 +106,46 @@ exit $EXIT_CODE
 		return "", fmt.Errorf("failed to create wrapper script: %w", err)
 	}
 
-	// Schedule task with `at` command using echo to pipe command
-	atCmd := fmt.Sprintf("echo 'bash %s' | at now", scriptPath)
-	cmd := exec.Command("sh", "-c", atCmd)
-	
-	if err := cmd.Run(); err != nil {
-		log.Printf("[TASK] Failed to schedule task with at: %v", err)
-		return "", fmt.Errorf("failed to schedule task with at: %w", err)
+	// Start task process directly (replaces `at` command)
+	// This works without elevated privileges
+	cmd := exec.Command("bash", scriptPath)
+
+	// Set up process attributes for background execution
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid: true, // Create new session to detach from terminal
 	}
-	
-	log.Printf("[TASK] Task scheduled: task_id=%s, task_name=%s, script=%s", taskID, taskName, scriptPath)
+
+	// Redirect stdin to /dev/null to detach from terminal
+	stdinFile, err := os.OpenFile("/dev/null", os.O_RDONLY, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to open /dev/null: %w", err)
+	}
+	cmd.Stdin = stdinFile
+
+	// Start the process
+	if err := cmd.Start(); err != nil {
+		stdinFile.Close()
+		log.Printf("[TASK] Failed to start task process: %v", err)
+		return "", fmt.Errorf("failed to start task process: %w", err)
+	}
+	// Close stdin file after process has started (command has its own fd)
+	stdinFile.Close()
+
+	// Write PID immediately (the script will also write it, but this ensures it's there)
+	pid := cmd.Process.Pid
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0600); err != nil {
+		log.Printf("[TASK] Warning: failed to write PID file: %v", err)
+	}
+
+	// Don't wait for the process - let it run in background
+	// The process will write its own PID and exit code when done
+	go func() {
+		// Wait for process to complete (in background goroutine)
+		// This prevents zombie processes
+		cmd.Wait()
+	}()
+
+	log.Printf("[TASK] Task started: task_id=%s, task_name=%s, pid=%d, script=%s", taskID, taskName, pid, scriptPath)
 
 	// Calculate max execution time
 	var maxExecTime time.Duration
@@ -155,6 +187,33 @@ func (tm *TaskManager) GetTask(taskID string) (*RunningTask, error) {
 	return task, nil
 }
 
+// GetAllTasks returns all running tasks (for cleanup on shutdown)
+func (tm *TaskManager) GetAllTasks() []*RunningTask {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	tasks := make([]*RunningTask, 0, len(tm.runningTasks))
+	for _, task := range tm.runningTasks {
+		tasks = append(tasks, task)
+	}
+	return tasks
+}
+
+// CleanupAllTasks removes all task directories (for shutdown)
+func (tm *TaskManager) CleanupAllTasks() {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	log.Printf("[TASK] Cleaning up %d task directories", len(tm.runningTasks))
+	for taskID, task := range tm.runningTasks {
+		if err := os.RemoveAll(task.OutputDir); err != nil {
+			log.Printf("[TASK] Failed to cleanup directory %s (task_id=%s): %v", task.OutputDir, taskID, err)
+		} else {
+			log.Printf("[TASK] Cleaned up directory: %s (task_id=%s)", task.OutputDir, taskID)
+		}
+	}
+}
+
 // validateAndProcessParameters validates all parameters according to their definitions
 // Returns a map of validated parameter values as strings
 func validateAndProcessParameters(paramDefs []ParameterConfig, providedParams map[string]interface{}) (map[string]string, error) {
@@ -170,10 +229,8 @@ func validateAndProcessParameters(paramDefs []ParameterConfig, providedParams ma
 
 	// Create a map of provided parameters for quick lookup
 	providedMap := make(map[string]interface{})
-	if providedParams != nil {
-		for k, v := range providedParams {
-			providedMap[k] = v
-		}
+	for k, v := range providedParams {
+		providedMap[k] = v
 	}
 
 	// Validate each defined parameter
@@ -226,4 +283,3 @@ func substituteParameters(command string, parameters map[string]string) string {
 	}
 	return result
 }
-

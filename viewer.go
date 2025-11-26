@@ -8,7 +8,7 @@ import (
 )
 
 // handleViewer serves the HTML viewer page
-func handleViewer(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config) {
+func handleViewer(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config, htmlCache *HTMLCache) {
 	log.Printf("[VIEWER] Viewer accessed from %s", r.RemoteAddr)
 	
 	// Authenticate request - Viewer tokens must have audience="viewer"
@@ -16,7 +16,7 @@ func handleViewer(w http.ResponseWriter, r *http.Request, taskManager *TaskManag
 	claims, err := validateJWT(r, config.Auth.Secret, &viewerAudience)
 	if err != nil {
 		log.Printf("[VIEWER] Authentication failed: %v", err)
-		serveErrorHTML(w, http.StatusUnauthorized, config.Server.HTMLDir)
+		serveErrorHTML(w, http.StatusUnauthorized, htmlCache)
 		return
 	}
 
@@ -27,7 +27,7 @@ func handleViewer(w http.ResponseWriter, r *http.Request, taskManager *TaskManag
 
 	if taskID == "" {
 		log.Printf("[VIEWER] Missing task_id")
-		serveErrorHTML(w, http.StatusBadRequest, config.Server.HTMLDir)
+		serveErrorHTML(w, http.StatusBadRequest, htmlCache)
 		return
 	}
 
@@ -35,7 +35,7 @@ func handleViewer(w http.ResponseWriter, r *http.Request, taskManager *TaskManag
 	_, err = taskManager.GetTask(taskID)
 	if err != nil {
 		log.Printf("[VIEWER] Task not found: task_id=%s, error=%v", taskID, err)
-		serveErrorHTML(w, http.StatusNotFound, config.Server.HTMLDir)
+		serveErrorHTML(w, http.StatusNotFound, htmlCache)
 		return
 	}
 	
@@ -44,7 +44,7 @@ func handleViewer(w http.ResponseWriter, r *http.Request, taskManager *TaskManag
 	// Get token from query
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		serveErrorHTML(w, http.StatusBadRequest, config.Server.HTMLDir)
+		serveErrorHTML(w, http.StatusBadRequest, htmlCache)
 		return
 	}
 
@@ -55,11 +55,11 @@ func handleViewer(w http.ResponseWriter, r *http.Request, taskManager *TaskManag
 	}
 	wsURL := fmt.Sprintf("%s://%s/ws?task_id=%s&token=%s", scheme, r.Host, taskID, token)
 
-	// Load viewer HTML template
-	htmlTemplate, err := loadViewerHTML(config.Server.HTMLDir)
+	// Load viewer HTML template from cache
+	htmlTemplate, err := loadViewerHTML(htmlCache)
 	if err != nil {
 		log.Printf("[VIEWER] Failed to load viewer.html: %v", err)
-		serveErrorHTML(w, http.StatusInternalServerError, config.Server.HTMLDir)
+		serveErrorHTML(w, http.StatusInternalServerError, htmlCache)
 		return
 	}
 
