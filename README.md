@@ -233,6 +233,7 @@ Startet einen Task.
 ```
 
 **Fehler:**
+
 - `400 Bad Request`: Ungültige Parameter, fehlende erforderliche Parameter, ungültige Zeichen
 - `401 Unauthorized`: Ungültiges oder fehlendes JWT-Token
 - `500 Internal Server Error`: Task konnte nicht gestartet werden
