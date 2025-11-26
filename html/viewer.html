@@ -206,7 +206,7 @@
             const labelEl = tab.querySelector('.tab-label');
             const baseLabel = labelEl.getAttribute('data-base-label') || type.toUpperCase();
 
-            let label = baseLabel + ' [' + counts[type] + ']';
+            let label = baseLabel;
             if (lastPreview[type]) {
                 label += ' - ' + lastPreview[type];
             }
