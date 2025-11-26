@@ -22,6 +22,18 @@ type StartTaskResponse struct {
 	ViewerURL string `json:"viewer_url"`
 }
 
+// ErrorResponse represents an error response in JSON format
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// sendJSONError sends a JSON error response
+func sendJSONError(w http.ResponseWriter, statusCode int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(ErrorResponse{Error: message})
+}
+
 // handleStartTask handles requests to start a task
 func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskManager, config *Config) {
 	log.Printf("[API] Start task request from %s", r.RemoteAddr)
@@ -30,14 +42,12 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	_, err := validateJWT(r, config.Auth.Secret)
 	if err != nil {
 		log.Printf("[API] Authentication failed: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Unauthorized: %v", err)})
+		sendJSONError(w, http.StatusUnauthorized, fmt.Sprintf("Unauthorized: %v", err))
 		return
 	}
 
 	if r.Method != http.MethodPost {
-		serveErrorHTML(w, http.StatusMethodNotAllowed, config.Server.HTMLDir)
+		sendJSONError(w, http.StatusMethodNotAllowed, "Method not allowed. Use POST.")
 		return
 	}
 
@@ -45,12 +55,12 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	// Use limited reader to prevent memory exhaustion
 	if err := decodeJSONRequest(r.Body, &req, maxJSONSize); err != nil {
 		log.Printf("[API] Failed to decode request: %v", err)
-		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		sendJSONError(w, http.StatusBadRequest, "Invalid request format")
 		return
 	}
 
 	if req.TaskName == "" {
-		http.Error(w, "task_name is required", http.StatusBadRequest)
+		sendJSONError(w, http.StatusBadRequest, "task_name is required")
 		return
 	}
 
@@ -58,7 +68,7 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	taskID, err := taskManager.StartTask(req.TaskName, req.Parameters)
 	if err != nil {
 		log.Printf("[API] Failed to start task '%s': %v", req.TaskName, err)
-		http.Error(w, fmt.Sprintf("Failed to start task: %v", err), http.StatusInternalServerError)
+		sendJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to start task: %v", err))
 		return
 	}
 	
@@ -67,7 +77,7 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	// Generate JWT token for viewer access
 	viewerToken, err := generateViewerToken(taskID, config.Auth.Secret, 24*time.Hour)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to generate viewer token: %v", err), http.StatusInternalServerError)
+		sendJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to generate viewer token: %v", err))
 		return
 	}
 

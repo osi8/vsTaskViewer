@@ -71,8 +71,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	claims, err := validateJWT(r, config.Auth.Secret)
 	if err != nil {
 		log.Printf("[WEBSOCKET] Authentication failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "Unauthorized: %v", err)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: fmt.Sprintf("Unauthorized: %v", err)})
 		return
 	}
 
@@ -83,8 +84,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 
 	if taskID == "" {
 		log.Printf("[WEBSOCKET] Missing task_id")
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "task_id is required")
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "task_id is required"})
 		return
 	}
 
@@ -92,8 +94,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	task, err := taskManager.GetTask(taskID)
 	if err != nil {
 		log.Printf("[WEBSOCKET] Task not found: task_id=%s, error=%v", taskID, err)
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprintf(w, "Task not found: %v", err)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: fmt.Sprintf("Task not found: %v", err)})
 		return
 	}
 
@@ -101,7 +104,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[WEBSOCKET] Failed to upgrade connection: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to upgrade connection: %v", err), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: fmt.Sprintf("Failed to upgrade connection: %v", err)})
 		return
 	}
 	defer conn.Close()
