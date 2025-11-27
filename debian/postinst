@@ -19,6 +19,19 @@ if [ ! -d /etc/vsTaskViewer ]; then
     mkdir -p /etc/vsTaskViewer
 fi
 
+# Ensure HTML directory exists and has correct permissions
+if [ ! -d /etc/vsTaskViewer/html ]; then
+    mkdir -p /etc/vsTaskViewer/html
+    chmod 755 /etc/vsTaskViewer/html
+fi
+
+# Ensure HTML files are readable (they should be installed by package, but verify)
+if [ -d /etc/vsTaskViewer/html ]; then
+    chmod 644 /etc/vsTaskViewer/html/*.html 2>/dev/null || true
+    # Ensure directory is readable
+    chmod 755 /etc/vsTaskViewer/html
+fi
+
 # Copy example config to actual config if it doesn't exist
 if [ ! -f /etc/vsTaskViewer/vsTaskViewer.toml ]; then
     cp /etc/vsTaskViewer/vsTaskViewer.toml.example /etc/vsTaskViewer/vsTaskViewer.toml

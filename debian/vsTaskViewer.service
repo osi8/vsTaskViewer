@@ -17,7 +17,9 @@ Group=root
 # The application safely drops privileges after loading TLS/HTML files
 NoNewPrivileges=false
 PrivateTmp=true
-ProtectSystem=strict
+# Use 'full' instead of 'strict' to allow reading from /etc/vsTaskViewer
+# The ReadOnlyPaths below will still restrict write access
+ProtectSystem=full
 ProtectHome=true
 # Allow writing to task directory
 ReadWritePaths=/var/vsTaskViewer
