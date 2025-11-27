@@ -3,7 +3,7 @@ Upstream-Name: vsTaskViewer
 Source: internal
 
 Files: *
-Copyright: $(date +%Y) ViStream GmbH
+Copyright: 2025 ViStream GmbH
 License: proprietary
 
 Software is for internal use and final licensing has not been decided yet.

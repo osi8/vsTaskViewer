@@ -4,5 +4,5 @@ vstaskviewer (1.0.0-1) unstable; urgency=medium
   * Package includes binary, systemd service, sample config, and HTML templates
   * Statically linked binary with no runtime library dependencies
 
- -- proggan <technik@vistram.online>  Thu, 27 Nov 2025 00:59:11 +0100
+ -- proggan <technik@vistream.online>  Thu, 27 Nov 2025 00:59:11 +0100
 
