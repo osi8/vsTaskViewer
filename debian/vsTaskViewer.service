@@ -1,0 +1,94 @@
+[Unit]
+Description=vsTaskViewer - Task execution viewer with WebSocket support
+Documentation=https://github.com/osi8/vsTaskViewer
+After=network-online.target
+Wants=network-online.target
+Requires=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+# Start as root to read TLS/HTML files, then drop to www-data
+# The application handles privilege dropping internally
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Allow writing to task directory
+ReadWritePaths=/var/vsTaskViewer
+# Allow reading from /etc/vsTaskViewer (config and HTML files) and TLS certificates
+ReadOnlyPaths=/etc/vsTaskViewer /etc/ssl /etc/letsencrypt
+
+# Restrict namespaces (prevent creating new namespaces)
+RestrictNamespaces=true
+
+# Restrict realtime scheduling
+RestrictRealtime=true
+
+# Restrict SUID/SGID binaries
+RestrictSUIDSGID=true
+
+# Prevent memory from being writable and executable at the same time
+MemoryDenyWriteExecute=true
+
+# Lock personality (prevent switching to different execution domains)
+LockPersonality=true
+
+# Protect kernel tunables and modules
+ProtectKernelTunables=true
+ProtectKernelModules=true
+
+# Protect control groups
+ProtectControlGroups=true
+
+# Restrict address families (only IPv4 and IPv6)
+RestrictAddressFamilies=AF_INET AF_INET6
+
+# Remove all capabilities except those needed
+# NET_BIND_SERVICE needed to bind to ports < 1024
+# CHOWN needed for task directory creation
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_CHOWN
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_CHOWN
+
+# Limit resources
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Working directory
+WorkingDirectory=/var/vsTaskViewer
+
+# Executable - updated to use /usr/bin for .deb package
+ExecStart=/usr/bin/vsTaskViewer \
+    -c /etc/vsTaskViewer/vsTaskViewer.toml \
+    -t /etc/vsTaskViewer/html \
+    -d /var/vsTaskViewer \
+    -u www-data
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Timeouts
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Kill mode
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vsTaskViewer
+
+# Environment
+Environment="PATH=/usr/bin:/bin"
+
+[Install]
+WantedBy=multi-user.target
+

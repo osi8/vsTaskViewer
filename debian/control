@@ -1,0 +1,23 @@
+Source: vstaskviewer
+Section: utils
+Priority: optional
+Maintainer: proggan <technik@vistream.online>
+Build-Depends: debhelper-compat (= 13), golang-go (>= 1.18)
+Standards-Version: 4.6.2
+Homepage: https://vistream.online
+
+Package: vstaskviewer
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Task execution viewer with WebSocket support
+ vsTaskViewer is a Go application that starts predefined commands as background tasks and displays their output (stdout/stderr)
+ live through a web interface.
+ .
+ Features:
+  - Parameterized tasks with typed parameters
+  - Web interface for live task output viewing
+  - WebSocket support for real-time streaming
+  - JWT authentication
+  - Rate limiting and security features
+  - Optional TLS/HTTPS support
+

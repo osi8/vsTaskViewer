@@ -1,0 +1,33 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export GOOS = linux
+export GOARCH = amd64
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	@echo "Building vsTaskViewer binary..."
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o vsTaskViewer \
+		main.go config.go auth.go task.go api.go viewer.go websocket.go \
+		websocket_manager.go html.go security.go errors.go ratelimit.go timeout.go
+
+override_dh_auto_install:
+	@echo "Installing files..."
+	# Install binary
+	install -D -m 755 vsTaskViewer $(CURDIR)/debian/vstaskviewer/usr/bin/vsTaskViewer
+	# Install systemd service (use debian/ version with /usr/bin path)
+	install -D -m 644 debian/vsTaskViewer.service $(CURDIR)/debian/vstaskviewer/etc/systemd/system/vsTaskViewer.service
+	# Install sample config
+	install -D -m 644 example-config.toml $(CURDIR)/debian/vstaskviewer/etc/vsTaskViewer/vsTaskViewer.toml.example
+	# Install HTML files
+	install -d $(CURDIR)/debian/vstaskviewer/etc/vsTaskViewer/html
+	install -m 644 html/*.html $(CURDIR)/debian/vstaskviewer/etc/vsTaskViewer/html/
+	# Install README
+	install -D -m 644 README.md $(CURDIR)/debian/vstaskviewer/usr/share/doc/vstaskviewer/README.md
+
+override_dh_auto_clean:
+	rm -f vsTaskViewer
+	go clean
+

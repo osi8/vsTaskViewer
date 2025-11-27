@@ -1,0 +1,38 @@
+#!/bin/bash
+set -e
+
+# Check if www-data user exists
+if ! id -u www-data >/dev/null 2>&1; then
+    echo "Warning: www-data user does not exist. Creating it..."
+    useradd -r -s /usr/sbin/nologin www-data || true
+fi
+
+# Create task directory with proper ownership and permissions
+if [ ! -d /var/vsTaskViewer ]; then
+    mkdir -p /var/vsTaskViewer
+    chown www-data:www-data /var/vsTaskViewer
+    chmod 700 /var/vsTaskViewer
+fi
+
+# Create config directory if it doesn't exist
+if [ ! -d /etc/vsTaskViewer ]; then
+    mkdir -p /etc/vsTaskViewer
+fi
+
+# Copy example config to actual config if it doesn't exist
+if [ ! -f /etc/vsTaskViewer/vsTaskViewer.toml ]; then
+    cp /etc/vsTaskViewer/vsTaskViewer.toml.example /etc/vsTaskViewer/vsTaskViewer.toml
+    chmod 600 /etc/vsTaskViewer/vsTaskViewer.toml
+    echo "Created /etc/vsTaskViewer/vsTaskViewer.toml from example."
+    echo "WARNING: Please edit /etc/vsTaskViewer/vsTaskViewer.toml and change the auth.secret!"
+fi
+
+# Reload systemd and enable service
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl enable vsTaskViewer.service || true
+fi
+
+# DEBHELPER#
+exit 0
+

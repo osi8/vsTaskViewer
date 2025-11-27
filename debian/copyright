@@ -1,0 +1,9 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: vsTaskViewer
+Source: internal
+
+Files: *
+Copyright: $(date +%Y) ViStream GmbH
+License: proprietary
+
+Software is for internal use and final licensing has not been decided yet.
