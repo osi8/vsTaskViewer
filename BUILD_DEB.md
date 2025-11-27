@@ -95,10 +95,56 @@ debian/
 └── vsTaskViewer.service  # Systemd service file (uses /usr/bin)
 ```
 
+## Debugging Service Issues
+
+If the service fails to start, use the debug helper script:
+
+```bash
+sudo vsTaskViewer-debug
+```
+
+This script will:
+- Check if all required files exist
+- Verify permissions and ownership
+- Show recent journal logs
+- Test the binary directly
+
+### Manual Debugging
+
+1. **View service status:**
+   ```bash
+   sudo systemctl status vsTaskViewer.service -l
+   ```
+
+2. **View recent logs:**
+   ```bash
+   sudo journalctl -u vsTaskViewer.service -n 50 --no-pager
+   ```
+
+3. **Follow logs in real-time:**
+   ```bash
+   sudo journalctl -u vsTaskViewer.service -f
+   ```
+
+4. **Test binary directly (as root):**
+   ```bash
+   sudo /usr/bin/vsTaskViewer \
+       -c /etc/vsTaskViewer/vsTaskViewer.toml \
+       -t /etc/vsTaskViewer/html \
+       -d /var/vsTaskViewer \
+       -u www-data
+   ```
+
+5. **Check systemd service file:**
+   ```bash
+   sudo systemctl cat vsTaskViewer.service
+   ```
+
 ## Notes
 
 - The binary is statically linked and has **no runtime library dependencies**
 - The package automatically creates `/var/vsTaskViewer` with proper permissions (www-data:www-data, 700)
 - The systemd service is automatically enabled but not started (user must configure first)
 - The sample config is installed as `.example` - the postinst script copies it to the actual config if it doesn't exist
+- Logs are sent to both journal and console for easier debugging
 

@@ -26,6 +26,8 @@ override_dh_auto_install:
 	install -m 644 html/*.html $(CURDIR)/debian/vstaskviewer/etc/vsTaskViewer/html/
 	# Install README
 	install -D -m 644 README.md $(CURDIR)/debian/vstaskviewer/usr/share/doc/vstaskviewer/README.md
+	# Install debug helper script
+	install -D -m 755 debian/debug-service.sh $(CURDIR)/debian/vstaskviewer/usr/local/bin/vsTaskViewer-debug
 
 override_dh_auto_clean:
 	rm -f vsTaskViewer

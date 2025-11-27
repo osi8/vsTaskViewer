@@ -52,8 +52,10 @@ RestrictAddressFamilies=AF_INET AF_INET6
 # Remove all capabilities except those needed
 # NET_BIND_SERVICE needed to bind to ports < 1024
 # CHOWN needed for task directory creation
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_CHOWN
-AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_CHOWN
+# SETUID and SETGID needed to drop privileges from root to www-data
+# These are only used during startup, then privileges are dropped
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_CHOWN CAP_SETUID CAP_SETGID
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_CHOWN CAP_SETUID CAP_SETGID
 
 # Limit resources
 LimitNOFILE=65536
@@ -83,9 +85,9 @@ TimeoutStopSec=30
 KillMode=mixed
 KillSignal=SIGTERM
 
-# Logging
-StandardOutput=journal
-StandardError=journal
+# Logging - send both to journal and console for easier debugging
+StandardOutput=journal+console
+StandardError=journal+console
 SyslogIdentifier=vsTaskViewer
 
 # Environment
