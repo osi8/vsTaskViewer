@@ -2,6 +2,10 @@
 
 vsTaskViewer ist eine Go-Anwendung, die vordefinierte Tasks über den Linux `at`-Befehl als Hintergrund-Tasks startet und deren Ausgabe (stdout/stderr) live über einen Web-Interface anzeigt.
 
+> **Hinweis**: Dieser Code wurde mit Unterstützung von LLM/AI-Tools erstellt.
+
+![Code Coverage](https://osi8.de/coverage-40.2_percent.svg)
+
 ## Features
 
 - **Task-Management**: Startet vordefinierte Tasks über den `at`-Befehl
