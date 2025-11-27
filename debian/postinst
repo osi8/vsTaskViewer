@@ -1,16 +1,42 @@
 #!/bin/bash
 set -e
 
-# Check if www-data user exists
+# Check if www-data user exists and verify it's a system user
 if ! id -u www-data >/dev/null 2>&1; then
     echo "Warning: www-data user does not exist. Creating it..."
-    useradd -r -s /usr/sbin/nologin www-data || true
+    useradd -r -s /usr/sbin/nologin www-data || {
+        echo "ERROR: Failed to create www-data user"
+        exit 1
+    }
+else
+    # Verify www-data is a system user (UID < 1000 on most systems, or check /etc/login.defs)
+    WWW_DATA_UID=$(id -u www-data)
+    if [ "$WWW_DATA_UID" -ge 1000 ] 2>/dev/null; then
+        echo "WARNING: www-data has UID $WWW_DATA_UID (>= 1000). This may not be a system user."
+    fi
 fi
 
 # Create task directory with proper ownership and permissions
 if [ ! -d /var/vsTaskViewer ]; then
     mkdir -p /var/vsTaskViewer
-    chown www-data:www-data /var/vsTaskViewer
+    chown www-data:www-data /var/vsTaskViewer || {
+        echo "ERROR: Failed to set ownership of /var/vsTaskViewer"
+        exit 1
+    }
+    chmod 700 /var/vsTaskViewer || {
+        echo "ERROR: Failed to set permissions on /var/vsTaskViewer"
+        exit 1
+    }
+else
+    # Verify existing directory has correct permissions
+    CURRENT_OWNER=$(stat -c '%U:%G' /var/vsTaskViewer 2>/dev/null || echo "unknown")
+    if [ "$CURRENT_OWNER" != "www-data:www-data" ]; then
+        echo "WARNING: /var/vsTaskViewer is owned by $CURRENT_OWNER, should be www-data:www-data"
+        chown www-data:www-data /var/vsTaskViewer || {
+            echo "ERROR: Failed to fix ownership of /var/vsTaskViewer"
+            exit 1
+        }
+    fi
     chmod 700 /var/vsTaskViewer
 fi
 
@@ -27,17 +53,28 @@ fi
 
 # Ensure HTML files are readable (they should be installed by package, but verify)
 if [ -d /etc/vsTaskViewer/html ]; then
-    chmod 644 /etc/vsTaskViewer/html/*.html 2>/dev/null || true
-    # Ensure directory is readable
+    # Set proper permissions on HTML files (readable by all, writable by root)
+    find /etc/vsTaskViewer/html -name "*.html" -type f -exec chmod 644 {} \; 2>/dev/null || true
+    # Ensure directory is readable and owned by root
     chmod 755 /etc/vsTaskViewer/html
+    chown root:root /etc/vsTaskViewer/html
 fi
 
 # Copy example config to actual config if it doesn't exist
 if [ ! -f /etc/vsTaskViewer/vsTaskViewer.toml ]; then
-    cp /etc/vsTaskViewer/vsTaskViewer.toml.example /etc/vsTaskViewer/vsTaskViewer.toml
-    chmod 600 /etc/vsTaskViewer/vsTaskViewer.toml
+    cp /etc/vsTaskViewer/vsTaskViewer.toml.example /etc/vsTaskViewer/vsTaskViewer.toml || {
+        echo "ERROR: Failed to create config file from example"
+        exit 1
+    }
+    chmod 600 /etc/vsTaskViewer/vsTaskViewer.toml || {
+        echo "ERROR: Failed to set config file permissions"
+        exit 1
+    }
+    # Ensure root ownership
+    chown root:root /etc/vsTaskViewer/vsTaskViewer.toml
     echo "Created /etc/vsTaskViewer/vsTaskViewer.toml from example."
     echo "WARNING: Please edit /etc/vsTaskViewer/vsTaskViewer.toml and change the auth.secret!"
+    echo "WARNING: The default secret is insecure and must be changed before use in production!"
 fi
 
 # Reload systemd and enable service

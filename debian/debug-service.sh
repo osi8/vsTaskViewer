@@ -1,8 +1,18 @@
 #!/bin/bash
 # Helper script to debug vsTaskViewer service issues
 # Run this script to get detailed error information
+#
+# SECURITY NOTE: This script requires root privileges and may expose sensitive
+# information. Use only for debugging in trusted environments.
+# Consider removing or restricting access in production deployments.
 
 set -e
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo "ERROR: This script must be run as root"
+    exit 1
+fi
 
 echo "=== vsTaskViewer Service Debug Helper ==="
 echo ""

@@ -140,11 +140,30 @@ This script will:
    sudo systemctl cat vsTaskViewer.service
    ```
 
+## Security
+
+The package includes comprehensive security hardening:
+
+- **Systemd security**: Multiple hardening options enabled (see `debian/vsTaskViewer.service`)
+- **Privilege dropping**: Service starts as root, then drops to `www-data` user
+- **File permissions**: Config files are `600` (root only), task directory is `700` (www-data only)
+- **Capability restrictions**: Only necessary capabilities are granted
+- **Filesystem protection**: Read-only access to system directories
+
+For detailed security information, see:
+- `/usr/share/doc/vstaskviewer/SECURITY.md` (after installation)
+- `debian/SECURITY.md` (in source package)
+
+**Important Security Notes:**
+- Change the default `auth.secret` in the config file before production use
+- Consider removing `+console` from logging in production (see service file)
+- Review and restrict debug script access in production environments
+
 ## Notes
 
 - The binary is statically linked and has **no runtime library dependencies**
 - The package automatically creates `/var/vsTaskViewer` with proper permissions (www-data:www-data, 700)
 - The systemd service is automatically enabled but not started (user must configure first)
 - The sample config is installed as `.example` - the postinst script copies it to the actual config if it doesn't exist
-- Logs are sent to both journal and console for easier debugging
+- Logs are sent to both journal and console for easier debugging (remove `+console` in production)
 

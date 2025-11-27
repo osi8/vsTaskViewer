@@ -48,6 +48,11 @@ ProtectKernelModules=true
 # Protect control groups
 ProtectControlGroups=true
 
+# Protect kernel logs, clock, and hostname
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+
 # Restrict address families (only IPv4 and IPv6)
 RestrictAddressFamilies=AF_INET AF_INET6
 
@@ -87,12 +92,15 @@ TimeoutStopSec=30
 KillMode=mixed
 KillSignal=SIGTERM
 
-# Logging - send both to journal and console for easier debugging
-StandardOutput=journal+console
-StandardError=journal+console
+# Logging - send to journal only
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=vsTaskViewer
 
-# Environment
+# Set umask for file creation (more restrictive)
+UMask=0027
+
+# Environment - minimal PATH to prevent PATH hijacking
 Environment="PATH=/usr/bin:/bin"
 
 [Install]
