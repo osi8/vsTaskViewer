@@ -13,7 +13,9 @@ Group=root
 # The application handles privilege dropping internally
 
 # Security hardening
-NoNewPrivileges=true
+# Note: NoNewPrivileges=false is required to allow the application to drop from root to www-data
+# The application safely drops privileges after loading TLS/HTML files
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
@@ -28,8 +30,8 @@ RestrictNamespaces=true
 # Restrict realtime scheduling
 RestrictRealtime=true
 
-# Restrict SUID/SGID binaries
-RestrictSUIDSGID=true
+# Restrict SUID/SGID binaries - must be false to allow Setuid/Setgid for privilege dropping
+RestrictSUIDSGID=false
 
 # Prevent memory from being writable and executable at the same time
 MemoryDenyWriteExecute=true
