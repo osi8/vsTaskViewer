@@ -1,3 +1,13 @@
+vstaskviewer (1.0.1-1) unstable; urgency=medium
+
+  * Documentation updates:
+    - Updated description to reflect that tasks are executed as background commands
+    - Added AI/LLM disclaimer to README
+    - Added code coverage badge (40.2%)
+  * Minor improvements and clarifications
+
+ -- proggan <technik@vistream.online>  Thu, 27 Nov 2025 20:06:50 +0100
+
 vstaskviewer (1.0.0-1) unstable; urgency=medium
 
   * Initial release

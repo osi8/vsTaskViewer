@@ -21,7 +21,7 @@ Simply run:
 make deb
 ```
 
-This will create a `.deb` file in the parent directory (e.g., `../vstaskviewer_1.0.0-1_amd64.deb`).
+This will create a `.deb` file in the parent directory (e.g., `../vstaskviewer_1.0.1-1_amd64.deb`).
 
 ### Manual Build
 
@@ -48,7 +48,7 @@ The `.deb` package includes:
 After building, install the package:
 
 ```bash
-sudo dpkg -i ../vstaskviewer_1.0.0-1_amd64.deb
+sudo dpkg -i ../vstaskviewer_1.0.1-1_amd64.deb
 ```
 
 If there are missing dependencies (unlikely for a statically linked binary), fix them with:
