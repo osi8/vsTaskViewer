@@ -100,7 +100,7 @@ debian/
 If the service fails to start, use the debug helper script:
 
 ```bash
-sudo vsTaskViewer-debug
+sudo /usr/bin/vsTaskViewer-debug
 ```
 
 This script will:
