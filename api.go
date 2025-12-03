@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -20,6 +24,14 @@ type StartTaskRequest struct {
 type StartTaskResponse struct {
 	TaskID    string `json:"task_id"`
 	ViewerURL string `json:"viewer_url"`
+}
+
+// computeSHA1Hex computes the SHA1 hash of the given data and returns it as a hex string.
+// This is used to bind API tokens to a specific request body for integrity protection.
+func computeSHA1Hex(data []byte) string {
+	h := sha1.New()
+	h.Write(data)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // ErrorResponse represents an error response in JSON format
@@ -40,7 +52,7 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 	
 	// Authenticate request - API tokens should have no audience or empty audience
 	apiAudience := ""
-	_, err := validateJWT(r, config.Auth.Secret, &apiAudience)
+	claims, err := validateJWT(r, config.Auth.Secret, &apiAudience)
 	if err != nil {
 		log.Printf("[API] Authentication failed: %v", err)
 		sendJSONError(w, http.StatusUnauthorized, fmt.Sprintf("Unauthorized: %v", err))
@@ -52,9 +64,26 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 		return
 	}
 
+	// Read complete request body (with size limit) for integrity check and JSON decoding
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxJSONSize))
+	if err != nil {
+		log.Printf("[API] Failed to read request body: %v", err)
+		sendJSONError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Compute SHA1 hash of the body and compare with JWT claim.
+	// This binds the API token to the exact request payload and prevents body tampering.
+	bodyHash := computeSHA1Hex(bodyBytes)
+	if claims.BodySHA1 == "" || claims.BodySHA1 != bodyHash {
+		log.Printf("[API] Body hash mismatch: token_claim=%q, computed=%q", claims.BodySHA1, bodyHash)
+		sendJSONError(w, http.StatusUnauthorized, "Unauthorized: request body does not match token")
+		return
+	}
+
 	var req StartTaskRequest
 	// Use limited reader to prevent memory exhaustion
-	if err := decodeJSONRequest(r.Body, &req, maxJSONSize); err != nil {
+	if err := decodeJSONRequest(bytes.NewReader(bodyBytes), &req, maxJSONSize); err != nil {
 		log.Printf("[API] Failed to decode request: %v", err)
 		sendJSONError(w, http.StatusBadRequest, "Invalid request format")
 		return

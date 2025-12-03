@@ -11,7 +11,8 @@ import (
 
 // Claims represents JWT claims
 type Claims struct {
-	TaskID string `json:"task_id"`
+	TaskID   string `json:"task_id"`
+	BodySHA1 string `json:"body_sha1,omitempty"`
 	jwt.RegisteredClaims
 }
 

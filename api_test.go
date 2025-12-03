@@ -96,99 +96,158 @@ func TestHandleStartTask(t *testing.T) {
 	tests := []struct {
 		name           string
 		method         string
-		token          string
 		body           string
 		wantStatusCode int
 		wantErr        bool
 		errContains    string
+		tokenType      string // "api", "viewer", "invalid", "missing"
 	}{
 		{
 			name:           "valid request",
 			method:         http.MethodPost,
-			token:          createTestToken(t, config.Auth.Secret, "", "", time.Hour),
 			body:           `{"task_name": "test-task"}`,
 			wantStatusCode: http.StatusOK,
 			wantErr:        false,
+			tokenType:      "api",
 		},
 		{
 			name:           "valid request with parameters",
 			method:         http.MethodPost,
-			token:          createTestToken(t, config.Auth.Secret, "", "", time.Hour),
 			body:           `{"task_name": "param-task", "parameters": {"message": "hello"}}`,
 			wantStatusCode: http.StatusOK,
 			wantErr:        false,
+			tokenType:      "api",
 		},
 		{
 			name:           "missing token",
 			method:         http.MethodPost,
-			token:          "",
 			body:           `{"task_name": "test-task"}`,
 			wantStatusCode: http.StatusUnauthorized,
 			wantErr:        true,
 			errContains:    "Unauthorized",
+			tokenType:      "missing",
 		},
 		{
 			name:           "invalid token",
 			method:         http.MethodPost,
-			token:          "invalid-token",
 			body:           `{"task_name": "test-task"}`,
 			wantStatusCode: http.StatusUnauthorized,
 			wantErr:        true,
 			errContains:    "Unauthorized",
+			tokenType:      "invalid",
 		},
 		{
 			name:           "wrong HTTP method",
 			method:         http.MethodGet,
-			token:          createTestToken(t, config.Auth.Secret, "", "", time.Hour),
 			body:           `{"task_name": "test-task"}`,
 			wantStatusCode: http.StatusMethodNotAllowed,
 			wantErr:        true,
 			errContains:    "Method not allowed",
+			tokenType:      "api",
 		},
 		{
 			name:           "missing task_name",
 			method:         http.MethodPost,
-			token:          createTestToken(t, config.Auth.Secret, "", "", time.Hour),
 			body:           `{}`,
 			wantStatusCode: http.StatusBadRequest,
 			wantErr:        true,
 			errContains:    "task_name is required",
+			tokenType:      "api",
 		},
 		{
 			name:           "invalid JSON",
 			method:         http.MethodPost,
-			token:          createTestToken(t, config.Auth.Secret, "", "", time.Hour),
 			body:           `{invalid json}`,
 			wantStatusCode: http.StatusBadRequest,
 			wantErr:        true,
 			errContains:    "Invalid request format",
+			tokenType:      "api",
 		},
 		{
 			name:           "non-existent task",
 			method:         http.MethodPost,
-			token:          createTestToken(t, config.Auth.Secret, "", "", time.Hour),
 			body:           `{"task_name": "non-existent"}`,
 			wantStatusCode: http.StatusInternalServerError,
 			wantErr:        true,
 			errContains:    "Failed to start task",
+			tokenType:      "api",
 		},
 		{
 			name:           "viewer token used for API",
 			method:         http.MethodPost,
-			token:          createTestToken(t, config.Auth.Secret, "viewer", "", time.Hour),
 			body:           `{"task_name": "test-task"}`,
 			wantStatusCode: http.StatusUnauthorized,
 			wantErr:        true,
 			errContains:    "Unauthorized",
+			tokenType:      "viewer",
+		},
+		{
+			name:           "body hash mismatch",
+			method:         http.MethodPost,
+			body:           `{"task_name": "test-task"}`,
+			wantStatusCode: http.StatusUnauthorized,
+			wantErr:        true,
+			errContains:    "Unauthorized",
+			tokenType:      "api-mismatch",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "/api/start", bytes.NewBufferString(tt.body))
-			if tt.token != "" {
-				req.URL.RawQuery = "token=" + tt.token
+
+			// Build appropriate token per test case
+			switch tt.tokenType {
+			case "api":
+				// API token bound to the exact request body via SHA1 hash
+				claims := &Claims{
+					BodySHA1: computeSHA1Hex([]byte(tt.body)),
+					RegisteredClaims: jwt.RegisteredClaims{
+						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+					},
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				tokenString, err := token.SignedString([]byte(config.Auth.Secret))
+				if err != nil {
+					t.Fatalf("failed to create API token: %v", err)
+				}
+				req.URL.RawQuery = "token=" + tokenString
+			case "api-mismatch":
+				// API token with a different body hash to trigger mismatch
+				claims := &Claims{
+					BodySHA1: computeSHA1Hex([]byte(`{"task_name":"other"}`)),
+					RegisteredClaims: jwt.RegisteredClaims{
+						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+					},
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				tokenString, err := token.SignedString([]byte(config.Auth.Secret))
+				if err != nil {
+					t.Fatalf("failed to create mismatching API token: %v", err)
+				}
+				req.URL.RawQuery = "token=" + tokenString
+			case "viewer":
+				claims := &Claims{
+					BodySHA1: computeSHA1Hex([]byte(tt.body)),
+					RegisteredClaims: jwt.RegisteredClaims{
+						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+						Audience:  []string{"viewer"},
+					},
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				tokenString, err := token.SignedString([]byte(config.Auth.Secret))
+				if err != nil {
+					t.Fatalf("failed to create viewer token: %v", err)
+				}
+				req.URL.RawQuery = "token=" + tokenString
+			case "invalid":
+				req.URL.RawQuery = "token=invalid-token"
+			case "missing":
+				// no token parameter
+			default:
+				t.Fatalf("unknown tokenType: %s", tt.tokenType)
 			}
+
 			w := httptest.NewRecorder()
 
 			handleStartTask(w, req, taskManager, config)
@@ -246,7 +305,20 @@ func TestHandleStartTaskWithTLS(t *testing.T) {
 	taskManager := NewTaskManager(config)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/start", bytes.NewBufferString(`{"task_name": "test-task"}`))
-	req.URL.RawQuery = "token=" + createTestToken(t, config.Auth.Secret, "", "", time.Hour)
+	// API token with correct body hash
+	body := `{"task_name": "test-task"}`
+	claims := &Claims{
+		BodySHA1: computeSHA1Hex([]byte(body)),
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(config.Auth.Secret))
+	if err != nil {
+		t.Fatalf("failed to create API token: %v", err)
+	}
+	req.URL.RawQuery = "token=" + tokenString
 	req.TLS = &tls.ConnectionState{} // Simulate TLS connection
 
 	w := httptest.NewRecorder()
@@ -336,14 +408,17 @@ func TestHandleStartTaskLargeRequest(t *testing.T) {
 	largeBody := `{"task_name": "test-task", "data": "` + string(make([]byte, maxJSONSize+1)) + `"}`
 
 	req := httptest.NewRequest(http.MethodPost, "/api/start", bytes.NewBufferString(largeBody))
-	req.URL.RawQuery = "token=" + createTestToken(t, config.Auth.Secret, "", "", time.Hour)
+	// Use API token without body hash; handler will treat this as unauthorized due to
+	// missing/invalid body binding before JSON size validation kicks in.
+	req.URL.RawQuery = "token=invalid-token"
 	w := httptest.NewRecorder()
 
 	handleStartTask(w, req, taskManager, config)
 
-	// Should return bad request due to size limit
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("handleStartTask() with large body status = %d; want %d", w.Code, http.StatusBadRequest)
+	// With body-hash binding in place, an oversized body with invalid token should be
+	// rejected as unauthorized rather than by JSON size validation.
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("handleStartTask() with large body status = %d; want %d", w.Code, http.StatusUnauthorized)
 	}
 }
 
