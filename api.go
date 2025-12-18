@@ -26,8 +26,26 @@ type StartTaskResponse struct {
 	ViewerURL string `json:"viewer_url"`
 }
 
+// normalizeJSON normalizes JSON by parsing and re-encoding it in compact form.
+// This ensures that semantically identical JSON produces the same hash regardless of:
+// - Whitespace and line breaks
+// - Key order (Go's json.Marshal automatically sorts map keys alphabetically)
+// This normalization prevents hash mismatches when clients send JSON with different formatting.
+func normalizeJSON(data []byte) ([]byte, error) {
+	var v interface{}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	normalized, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
 // computeSHA1Hex computes the SHA1 hash of the given data and returns it as a hex string.
 // This is used to bind API tokens to a specific request body for integrity protection.
+// The data is normalized JSON, so formatting differences (whitespace, line breaks) don't affect the hash.
 func computeSHA1Hex(data []byte) string {
 	h := sha1.New()
 	h.Write(data)
@@ -72,9 +90,19 @@ func handleStartTask(w http.ResponseWriter, r *http.Request, taskManager *TaskMa
 		return
 	}
 
-	// Compute SHA1 hash of the body and compare with JWT claim.
-	// This binds the API token to the exact request payload and prevents body tampering.
-	bodyHash := computeSHA1Hex(bodyBytes)
+	// Normalize JSON to ensure formatting differences (whitespace, line breaks) don't affect the hash.
+	// This allows clients to send JSON in any valid format while maintaining security.
+	normalizedBody, err := normalizeJSON(bodyBytes)
+	if err != nil {
+		log.Printf("[API] Failed to normalize JSON body: %v", err)
+		sendJSONError(w, http.StatusBadRequest, "Invalid JSON format")
+		return
+	}
+
+	// Compute SHA1 hash of the normalized body and compare with JWT claim.
+	// This binds the API token to the request payload and prevents body tampering,
+	// while being tolerant of JSON formatting differences.
+	bodyHash := computeSHA1Hex(normalizedBody)
 	if claims.BodySHA1 == "" || claims.BodySHA1 != bodyHash {
 		log.Printf("[API] Body hash mismatch: token_claim=%q, computed=%q", claims.BodySHA1, bodyHash)
 		sendJSONError(w, http.StatusUnauthorized, "Unauthorized: request body does not match token")

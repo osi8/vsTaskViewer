@@ -13,6 +13,17 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// computeBodyHashForToken computes the body hash using normalized JSON, matching server behavior.
+// This ensures tests use the same normalization as the server.
+func computeBodyHashForToken(body string) string {
+	normalized, err := normalizeJSON([]byte(body))
+	if err != nil {
+		// If normalization fails, return hash of original (for invalid JSON test cases)
+		return computeSHA1Hex([]byte(body))
+	}
+	return computeSHA1Hex(normalized)
+}
+
 func TestSendJSONError(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -160,7 +171,7 @@ func TestHandleStartTask(t *testing.T) {
 			body:           `{invalid json}`,
 			wantStatusCode: http.StatusBadRequest,
 			wantErr:        true,
-			errContains:    "Invalid request format",
+			errContains:    "Invalid JSON format",
 			tokenType:      "api",
 		},
 		{
@@ -199,9 +210,9 @@ func TestHandleStartTask(t *testing.T) {
 			// Build appropriate token per test case
 			switch tt.tokenType {
 			case "api":
-				// API token bound to the exact request body via SHA1 hash
+				// API token bound to the normalized request body via SHA1 hash
 				claims := &Claims{
-					BodySHA1: computeSHA1Hex([]byte(tt.body)),
+					BodySHA1: computeBodyHashForToken(tt.body),
 					RegisteredClaims: jwt.RegisteredClaims{
 						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 					},
@@ -215,7 +226,7 @@ func TestHandleStartTask(t *testing.T) {
 			case "api-mismatch":
 				// API token with a different body hash to trigger mismatch
 				claims := &Claims{
-					BodySHA1: computeSHA1Hex([]byte(`{"task_name":"other"}`)),
+					BodySHA1: computeBodyHashForToken(`{"task_name":"other"}`),
 					RegisteredClaims: jwt.RegisteredClaims{
 						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 					},
@@ -228,7 +239,7 @@ func TestHandleStartTask(t *testing.T) {
 				req.URL.RawQuery = "token=" + tokenString
 			case "viewer":
 				claims := &Claims{
-					BodySHA1: computeSHA1Hex([]byte(tt.body)),
+					BodySHA1: computeBodyHashForToken(tt.body),
 					RegisteredClaims: jwt.RegisteredClaims{
 						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 						Audience:  []string{"viewer"},
@@ -305,10 +316,10 @@ func TestHandleStartTaskWithTLS(t *testing.T) {
 	taskManager := NewTaskManager(config)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/start", bytes.NewBufferString(`{"task_name": "test-task"}`))
-	// API token with correct body hash
+	// API token with correct body hash (using normalized JSON)
 	body := `{"task_name": "test-task"}`
 	claims := &Claims{
-		BodySHA1: computeSHA1Hex([]byte(body)),
+		BodySHA1: computeBodyHashForToken(body),
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
@@ -419,6 +430,42 @@ func TestHandleStartTaskLargeRequest(t *testing.T) {
 	// rejected as unauthorized rather than by JSON size validation.
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("handleStartTask() with large body status = %d; want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestJSONNormalization(t *testing.T) {
+	// Test that different JSON formatting produces the same hash
+	body1 := `{"task_name":"test"}`
+	body2 := `{"task_name": "test"}`
+	body3 := `{
+		"task_name": "test"
+	}`
+
+	hash1 := computeBodyHashForToken(body1)
+	hash2 := computeBodyHashForToken(body2)
+	hash3 := computeBodyHashForToken(body3)
+
+	if hash1 != hash2 {
+		t.Errorf("JSON normalization failed: hash1=%q != hash2=%q (different whitespace)", hash1, hash2)
+	}
+	if hash1 != hash3 {
+		t.Errorf("JSON normalization failed: hash1=%q != hash3=%q (different line breaks)", hash1, hash3)
+	}
+
+	// Test that different key order produces the same hash (including nested maps)
+	body4 := `{"task_name":"test","parameters":{"z":3,"a":1,"b":2}}`
+	body5 := `{"parameters":{"b":2,"a":1,"z":3},"task_name":"test"}`
+	body6 := `{"parameters":{"a":1,"b":2,"z":3},"task_name":"test"}`
+
+	hash4 := computeBodyHashForToken(body4)
+	hash5 := computeBodyHashForToken(body5)
+	hash6 := computeBodyHashForToken(body6)
+
+	if hash4 != hash5 {
+		t.Errorf("JSON normalization failed: hash4=%q != hash5=%q (different key order)", hash4, hash5)
+	}
+	if hash4 != hash6 {
+		t.Errorf("JSON normalization failed: hash4=%q != hash6=%q (different key order)", hash4, hash6)
 	}
 }
 
