@@ -6,7 +6,7 @@ vsTaskViewer is a Go application that starts predefined commands as background t
 
 > **Note**: This code was created with the support of LLM/AI tools.
 
-![Code Coverage](https://osi8.de/coverage-40.2_percent.svg)
+![Code Coverage](https://osi8.de/coverage-49.8_percent.svg)
 
 ## Features
 
