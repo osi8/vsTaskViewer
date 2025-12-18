@@ -422,6 +422,12 @@
             });
         }
 
+        // Helper function to check if user is at the bottom of a scrollable element
+        function isAtBottom(element) {
+            const threshold = 30; // Small threshold to account for rounding
+            return element.scrollTop + element.clientHeight >= element.scrollHeight - threshold;
+        }
+
         Object.keys(tabs).forEach(type => {
             tabs[type].addEventListener('click', () => setActiveTab(type));
         });
@@ -440,25 +446,40 @@
                     try {
                         const data = JSON.parse(event.data);
                         if (data.type === 'stdout') {
+                            // Check if user is at bottom before appending
+                            const wasAtBottom = isAtBottom(stdoutEl);
                             // Convert ANSI codes to HTML for stdout
                             const html = ansiToHtml(data.data);
                             stdoutEl.insertAdjacentHTML('beforeend', html);
-                            stdoutEl.scrollTop = stdoutEl.scrollHeight;
+                            // Auto-scroll only if user was at bottom before appending
+                            if (wasAtBottom) {
+                                stdoutEl.scrollTop = stdoutEl.scrollHeight;
+                            }
                             updateTab('stdout', data.data);
                         } else if (data.type === 'stderr') {
+                            // Check if user is at bottom before appending
+                            const wasAtBottom = isAtBottom(stderrEl);
                             // Convert ANSI codes to HTML for stderr
                             const html = ansiToHtml(data.data);
                             stderrEl.insertAdjacentHTML('beforeend', html);
-                            stderrEl.scrollTop = stderrEl.scrollHeight;
+                            // Auto-scroll only if user was at bottom before appending
+                            if (wasAtBottom) {
+                                stderrEl.scrollTop = stderrEl.scrollHeight;
+                            }
                             updateTab('stderr', data.data);
                         } else if (data.type === 'system') {
+                            // Check if user is at bottom before appending
+                            const wasAtBottom = isAtBottom(systemEl);
                             let msg = data.message || '';
                             if (data.pid) {
                                 msg += ' (PID: ' + data.pid + ')';
                             }
                             // System messages don't need ANSI conversion
                             systemEl.textContent += msg + '\n';
-                            systemEl.scrollTop = systemEl.scrollHeight;
+                            // Auto-scroll only if user was at bottom before appending
+                            if (wasAtBottom) {
+                                systemEl.scrollTop = systemEl.scrollHeight;
+                            }
                             updateTab('system', msg);
 
                             if (data.message && data.message.includes('Process ended')) {
