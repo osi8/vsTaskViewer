@@ -1,5 +1,7 @@
 # vsTaskViewer
 
+**Language**: [English](README_en.md) | Deutsch
+
 vsTaskViewer ist eine Go-Anwendung, die vordefinierte Commands als Hintergrund-Tasks startet und deren Ausgabe (stdout/stderr) live über einen Web-Interface anzeigt.
 
 > **Hinweis**: Dieser Code wurde mit Unterstützung von LLM/AI-Tools erstellt.
