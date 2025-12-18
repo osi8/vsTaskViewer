@@ -8,7 +8,7 @@ vsTaskViewer ist eine Go-Anwendung, die vordefinierte Commands als Hintergrund-T
 
 ## Features
 
-- **Task-Management**: Startet vordefinierte Tasks über den `at`-Befehl
+- **Task-Management**: Startet vordefinierte Tasks als Hintergrundprozesse
 - **Parametrisierte Tasks**: Tasks können mit typisierten Parametern (int/string) konfiguriert werden
 - **Web-Interface**: Minimalistisches HTML-Interface zur Live-Anzeige der Task-Ausgabe
 - **WebSocket-Support**: Live-Streaming von stdout und stderr über WebSocket
@@ -214,24 +214,51 @@ Alle HTML-Dateien enthalten inline CSS und JavaScript.
 
 **1. JWT-Token generieren**
 
-Erstellen Sie ein JWT-Token mit HS256:
+Erstellen Sie ein JWT-Token mit HS256. **Wichtig**: API-Tokens müssen einen `body_sha1` Claim enthalten, der dem SHA1-Hash des normalisierten JSON-Request-Bodies entspricht.
 
 ```go
 // Beispiel in Go
-import "github.com/golang-jwt/jwt/v5"
+import (
+    "crypto/sha1"
+    "encoding/hex"
+    "encoding/json"
+    "github.com/golang-jwt/jwt/v5"
+    "time"
+)
 
+// Request-Body für den Task-Start
+requestBody := map[string]interface{}{
+    "task_name": "example-task",
+    // optional: "parameters": map[string]interface{}{...}
+}
+
+// JSON normalisieren (entfernt Whitespace-Unterschiede)
+bodyJSON, _ := json.Marshal(requestBody)
+
+// SHA1-Hash des normalisierten Bodies berechnen
+hash := sha1.New()
+hash.Write(bodyJSON)
+bodySHA1 := hex.EncodeToString(hash.Sum(nil))
+
+// JWT-Token mit body_sha1 Claim erstellen
 claims := jwt.MapClaims{
-    "task_id": "optional-task-id",
+    "body_sha1": bodySHA1,  // Erforderlich für API-Tokens
     "exp": time.Now().Add(24 * time.Hour).Unix(),
 }
 token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 tokenString, _ := token.SignedString([]byte("your-secret-key"))
 ```
 
+**Hinweis**: Der `body_sha1` Claim bindet das Token an den spezifischen Request-Body und verhindert Manipulationen. Der JSON-Body wird vor dem Hashing normalisiert, sodass Formatierungsunterschiede (Whitespace, Zeilenumbrüche) den Hash nicht beeinflussen.
+
 **2. Task über API starten**
+
+**Wichtig**: Das JWT-Token muss einen `body_sha1` Claim enthalten, der dem SHA1-Hash des normalisierten JSON-Request-Bodies entspricht. Siehe oben für ein Beispiel zur Token-Generierung.
 
 Task ohne Parameter:
 ```bash
+# Zuerst: Token mit body_sha1 für '{"task_name": "example-task"}' generieren
+# Dann:
 curl -X POST http://localhost:8080/api/start?token=YOUR_JWT_TOKEN \
   -H "Content-Type: application/json" \
   -d '{"task_name": "example-task"}'
@@ -239,6 +266,8 @@ curl -X POST http://localhost:8080/api/start?token=YOUR_JWT_TOKEN \
 
 Task mit Parametern:
 ```bash
+# Zuerst: Token mit body_sha1 für den Request-Body generieren
+# Dann:
 curl -X POST http://localhost:8080/api/start?token=YOUR_JWT_TOKEN \
   -H "Content-Type: application/json" \
   -d '{
@@ -270,7 +299,7 @@ Startet einen Task.
 
 **Query Parameter:**
 
-- `token`: JWT-Token (HS256)
+- `token`: JWT-Token (HS256) mit `body_sha1` Claim
 
 **Request Body:**
 ```json
@@ -283,11 +312,16 @@ Startet einen Task.
 }
 ```
 
+**Request Body Felder:**
 
 - `task_name` (erforderlich): Name des Tasks aus der Konfiguration
 - `parameters` (optional): Map von Parameternamen zu Werten
 - String-Parameter: `"param": "value"`
 - Integer-Parameter: `"param": 42` oder `"param": "42"`
+
+**Token-Anforderungen:**
+
+Das JWT-Token muss einen `body_sha1` Claim enthalten, der dem SHA1-Hash des normalisierten JSON-Request-Bodies entspricht. Der Server validiert, dass der Hash im Token mit dem tatsächlich gesendeten Request-Body übereinstimmt.
 
 **Response:**
 ```json
@@ -299,8 +333,8 @@ Startet einen Task.
 
 **Fehler:**
 
-- `400 Bad Request`: Ungültige Parameter, fehlende erforderliche Parameter, ungültige Zeichen
-- `401 Unauthorized`: Ungültiges oder fehlendes JWT-Token
+- `400 Bad Request`: Ungültige Parameter, fehlende erforderliche Parameter, ungültige Zeichen, ungültiges JSON-Format
+- `401 Unauthorized`: Ungültiges oder fehlendes JWT-Token, Token-Audience-Mismatch, Request-Body-Hash stimmt nicht mit Token überein
 - `500 Internal Server Error`: Task konnte nicht gestartet werden
 
 ### GET /viewer
@@ -356,6 +390,7 @@ Alle Requests müssen ein JWT-Token im URL-Query-Parameter `token` enthalten.
 **Claims:**
 
 - `task_id` (optional): Task-Kennung
+- `body_sha1` (erforderlich für API-Tokens): SHA1-Hash des normalisierten JSON-Request-Bodies (hex-kodiert)
 - `exp`: Ablaufzeit (Unix Timestamp)
 - `aud` (Audience): Token-Typ zur Verhinderung von Token-Reuse
   - **API-Tokens**: Kein `aud` Claim oder leerer `aud` Claim
@@ -366,11 +401,28 @@ Alle Requests müssen ein JWT-Token im URL-Query-Parameter `token` enthalten.
 - Algorithmus: HS256
 - Secret: Aus der Konfiguration (`auth.secret`)
 
+**Body-Hashing für API-Tokens:**
+
+API-Tokens müssen einen `body_sha1` Claim enthalten, der dem SHA1-Hash des normalisierten JSON-Request-Bodies entspricht. Dies bietet folgende Sicherheitsvorteile:
+
+- **Integritätsschutz**: Verhindert Manipulation des Request-Bodies nach Token-Generierung
+- **Token-Bindung**: Bindet das Token an einen spezifischen Request
+- **Normalisierung**: Der JSON-Body wird vor dem Hashing normalisiert (Whitespace, Zeilenumbrüche und Schlüsselreihenfolge werden ignoriert), sodass Formatierungsunterschiede den Hash nicht beeinflussen
+
+**Beispiel für Body-Hash-Berechnung:**
+
+1. Erstellen Sie den JSON-Request-Body (z.B. `{"task_name": "example-task"}`)
+2. Normalisieren Sie den JSON (parsen und neu encodieren in kompakter Form)
+3. Berechnen Sie den SHA1-Hash des normalisierten JSON
+4. Kodieren Sie den Hash als Hex-String
+5. Fügen Sie den Hash als `body_sha1` Claim zum JWT-Token hinzu
+
 **Sicherheit:**
 
 - Viewer-Tokens haben `aud="viewer"` und können **nicht** für API-Requests verwendet werden
 - API-Tokens haben kein `aud` Claim und können **nicht** für Viewer/WebSocket-Endpunkte verwendet werden
-- Dies verhindert, dass Viewer-Tokens für neue API-Requests missbraucht werden
+- API-Tokens müssen einen `body_sha1` Claim enthalten, der dem Request-Body entspricht
+- Dies verhindert, dass Viewer-Tokens für neue API-Requests missbraucht werden und schützt vor Request-Body-Manipulation
 
 ## Task-Ausgabe
 
@@ -544,8 +596,9 @@ Bei fehlerhaften Parametern wird ein `400 Bad Request` mit einer beschreibenden 
 ## Sicherheit
 
 - **JWT-Authentifizierung**: Alle Endpunkte (außer `/health`) erfordern gültige JWT-Tokens
+- **Body-Hashing**: API-Tokens müssen einen `body_sha1` Claim enthalten, der dem Request-Body entspricht - verhindert Request-Body-Manipulation
 - **Vordefinierte Tasks**: Nur in der Konfiguration definierte Tasks können gestartet werden
-- **Token-Validierung**: Expiration und Signatur werden geprüft
+- **Token-Validierung**: Expiration, Signatur und Audience werden geprüft
 - **Parameter-Validierung**: Strikte Typ- und Zeichen-Validierung verhindert Command-Injection
 - **Rate Limiting**: Schutz vor Brute-Force und DoS-Angriffen
 - **Request Size Limits**: Schutz vor zu großen Requests (Standard: 10MB)
