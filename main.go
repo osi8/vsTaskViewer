@@ -18,12 +18,12 @@ import (
 )
 
 var (
-	configPathFlag   = flag.String("c", "", "Path to configuration file (optional)")
+	configPathFlag    = flag.String("c", "", "Path to configuration file (optional)")
 	templatesPathFlag = flag.String("t", "", "Path to templates/HTML directory (optional)")
-	taskDirFlag      = flag.String("d", "", "Path to task output directory (optional)")
-	execUserFlag     = flag.String("u", "", "User to run as (optional)")
-	port             = flag.Int("p", 8080, "Port to listen on")
-	showHelp         = flag.Bool("h", false, "Show help message")
+	taskDirFlag       = flag.String("d", "", "Path to task output directory (optional)")
+	execUserFlag      = flag.String("u", "", "User to run as (optional)")
+	port              = flag.Int("p", 8080, "Port to listen on")
+	showHelp          = flag.Bool("h", false, "Show help message")
 )
 
 const usage = `vsTaskViewer - Task execution viewer with WebSocket support
@@ -197,12 +197,17 @@ func main() {
 	}
 	log.Printf("Loaded HTML files from %s", config.Server.HTMLDir)
 
-	// Drop privileges to exec user (after loading TLS and HTML files)
+	// Prepare task directory (create and set ownership) - must be done before dropping privileges
+	if err := prepareTaskDir(config.Server.TaskDir, config.Server.ExecUser); err != nil {
+		log.Fatalf("Task directory preparation failed: %v", err)
+	}
+
+	// Drop privileges to exec user (after loading TLS and HTML files and preparing task directory)
 	if err := dropPrivileges(config.Server.ExecUser); err != nil {
 		log.Fatalf("Failed to drop privileges: %v", err)
 	}
 
-	// Validate task directory (check/create, ownership, permissions) - now as exec user
+	// Validate task directory (check ownership, permissions) - now as exec user
 	if err := validateTaskDir(config.Server.TaskDir); err != nil {
 		log.Fatalf("Task directory validation failed: %v", err)
 	}
@@ -251,12 +256,12 @@ func main() {
 	})
 
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", *port),
-		Handler:      mux,
+		Addr:           fmt.Sprintf(":%d", *port),
+		Handler:        mux,
 		MaxHeaderBytes: 1 << 20, // 1MB max header size
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		IdleTimeout:    60 * time.Second,
 	}
 
 	// Graceful shutdown
@@ -266,13 +271,13 @@ func main() {
 		<-sigint
 
 		log.Println("Shutting down server...")
-		
+
 		// Notify all WebSocket connections
 		wsManager.BroadcastShutdown("Server stopped, closing connection")
-		
+
 		// Cleanup all task directories
 		taskManager.CleanupAllTasks()
-		
+
 		// Shutdown HTTP server
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -280,7 +285,7 @@ func main() {
 		if err := server.Shutdown(ctx); err != nil {
 			log.Printf("Server shutdown error: %v", err)
 		}
-		
+
 		log.Println("Server shutdown complete")
 	}()
 
@@ -450,6 +455,59 @@ func findTaskDir() (string, error) {
 	return defaultTaskDir, nil // Return default even if it doesn't exist yet (will be created in validation)
 }
 
+// prepareTaskDir creates the task directory and sets ownership/permissions (must be run as root)
+// This should be called before dropping privileges
+func prepareTaskDir(taskDir string, targetUser string) error {
+	// Get current user
+	currentUID := os.Getuid()
+	if currentUID != 0 {
+		// Not running as root, skip preparation (will be handled in validation)
+		log.Printf("Not running as root (UID: %d), skipping task directory preparation", currentUID)
+		return nil
+	}
+
+	// Lookup target user to get UID/GID
+	uid, gid, err := lookupUser(targetUser)
+	if err != nil {
+		return fmt.Errorf("failed to lookup target user %s: %w", targetUser, err)
+	}
+
+	// Check if directory exists
+	info, err := os.Stat(taskDir)
+	if os.IsNotExist(err) {
+		// Create directory with 0700 permissions
+		if err := os.MkdirAll(taskDir, 0700); err != nil {
+			return fmt.Errorf("cannot create task directory %s: %w", taskDir, err)
+		}
+		log.Printf("Created task directory: %s", taskDir)
+		// Re-stat to get info about newly created directory
+		info, err = os.Stat(taskDir)
+		if err != nil {
+			return fmt.Errorf("failed to stat newly created directory: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("cannot access task directory %s: %w", taskDir, err)
+	}
+
+	// Check if it's actually a directory
+	if !info.IsDir() {
+		return fmt.Errorf("task directory path %s exists but is not a directory", taskDir)
+	}
+
+	// Set ownership to target user
+	if err := os.Chown(taskDir, uid, gid); err != nil {
+		return fmt.Errorf("failed to set ownership of task directory %s to user %s (UID: %d, GID: %d): %w", taskDir, targetUser, uid, gid, err)
+	}
+
+	// Set permissions to 0700
+	if err := os.Chmod(taskDir, 0700); err != nil {
+		return fmt.Errorf("failed to set permissions of task directory %s to 0700: %w", taskDir, err)
+	}
+
+	log.Printf("Prepared task directory: %s (UID: %d, GID: %d, Permissions: 0700)", taskDir, uid, gid)
+	return nil
+}
+
 // validateTaskDir validates the task directory:
 // - Checks if directory exists or can be created
 // - Verifies ownership matches process executor
@@ -571,4 +629,3 @@ func dropPrivileges(username string) error {
 	log.Printf("Dropped privileges to user %s (UID: %d, GID: %d)", username, uid, gid)
 	return nil
 }
-
